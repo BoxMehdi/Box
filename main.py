@@ -5,6 +5,10 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pymongo import MongoClient
 from urllib.parse import quote_plus
 from flask import Flask
+import logging
+
+# تنظیمات لاگ
+logging.basicConfig(level=logging.INFO)
 
 API_ID = 26438691
 API_HASH = "b9a6835fa0eea6e9f8a320b3ab1ae"
@@ -17,6 +21,7 @@ MONGO_CLUSTER = "boxofficeuploaderbot.2howsv3.mongodb.net"
 
 MONGO_PASS_ENCODED = quote_plus(MONGO_PASS)
 MONGO_URI = f"mongodb+srv://{MONGO_USER}:{MONGO_PASS_ENCODED}@{MONGO_CLUSTER}/?retryWrites=true&w=majority&appName=BoxOfficeUploaderBot"
+
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client["boxoffice_db"]
 files_collection = db["files"]
@@ -41,6 +46,7 @@ def run_flask():
 
 def keep_alive():
     t = threading.Thread(target=run_flask)
+    t.daemon = True
     t.start()
 
 bot = Client("boxoffice_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -51,7 +57,8 @@ async def user_is_subscribed(client, user_id):
             member = await client.get_chat_member(channel, user_id)
             if member.status in ("left", "kicked"):
                 return False
-        except:
+        except Exception as e:
+            logging.warning(f"Cannot check membership in {channel} for user {user_id}: {e}")
             return False
     return True
 
@@ -71,69 +78,76 @@ def get_more_files_buttons():
 
 @bot.on_message(filters.private & filters.command("start"))
 async def start_handler(client, message):
-    user_id = message.from_user.id
-    args = message.text.split()
+    try:
+        user_id = message.from_user.id
+        args = message.text.split()
 
-    if len(args) == 2:
-        film_id = args[1]
+        if len(args) == 2:
+            film_id = args[1]
 
-        if not await user_is_subscribed(client, user_id):
-            await message.reply(
-                "❗️ لطفاً ابتدا در همه کانال‌های زیر عضو شوید و سپس روی دکمه 'عضو شدم' بزنید:",
-                reply_markup=get_subscribe_buttons()
-            )
+            if not await user_is_subscribed(client, user_id):
+                await message.reply(
+                    "❗️ لطفاً ابتدا در همه کانال‌های زیر عضو شوید و سپس روی دکمه 'عضو شدم' بزنید:",
+                    reply_markup=get_subscribe_buttons()
+                )
+                return
+
+            files = list(files_collection.find({"film_id": film_id}))
+            if not files:
+                await message.reply("❌ هیچ فایلی با این شناسه پیدا نشد.")
+                return
+
+            sent_messages = []
+            for file in files:
+                caption_text = f"{file.get('caption','')} | کیفیت: {file.get('quality','نامشخص')}"
+                sent = await client.send_video(message.chat.id, file['file_id'], caption=caption_text)
+                sent_messages.append(sent)
+
+            warning_msg = await message.reply("⚠️ توجه: فایل‌ها تا ۳۰ ثانیه دیگر حذف خواهند شد، لطفاً آنها را ذخیره کنید.")
+            sent_messages.append(warning_msg)
+
+            asyncio.create_task(delete_messages_after(client, sent_messages, 30))
             return
 
-        files = list(files_collection.find({"film_id": film_id}))
-        if not files:
-            await message.reply("❌ هیچ فایلی با این شناسه پیدا نشد.")
-            return
-
-        sent_messages = []
-        for file in files:
-            caption_text = f"{file['caption']} | کیفیت: {file['quality']}"
-            sent = await client.send_video(message.chat.id, file['file_id'], caption=caption_text)
-            sent_messages.append(sent)
-
-        warning_msg = await message.reply("⚠️ توجه: فایل‌ها تا ۳۰ ثانیه دیگر حذف خواهند شد، لطفاً آنها را ذخیره کنید.")
-        sent_messages.append(warning_msg)
-
-        asyncio.create_task(delete_messages_after(client, sent_messages, 30))
-        return
-
-    await message.reply(
-        "🎬 به ربات BoxOffice خوش آمدید!\n\n"
-        "ابتدا باید در کانال‌های زیر عضو شوید:",
-        reply_markup=get_subscribe_buttons()
-    )
+        await message.reply(
+            "🎬 به ربات BoxOffice خوش آمدید!\n\n"
+            "ابتدا باید در کانال‌های زیر عضو شوید:",
+            reply_markup=get_subscribe_buttons()
+        )
+    except Exception as e:
+        logging.error(f"Error in start_handler: {e}")
+        await message.reply("❌ خطایی رخ داده است، لطفاً دوباره تلاش کنید.")
 
 @bot.on_callback_query(filters.regex("^check_subscription$"))
 async def check_subscription(client, callback_query):
     user_id = callback_query.from_user.id
+    try:
+        if await user_is_subscribed(client, user_id):
+            user_record = user_joined_collection.find_one({"user_id": user_id})
 
-    if await user_is_subscribed(client, user_id):
-        user_record = user_joined_collection.find_one({"user_id": user_id})
-
-        if not user_record:
-            await callback_query.answer("✅ عضویت شما تایید شد!", show_alert=True)
-            await callback_query.message.edit(
-                "🎉 تبریک! شما برای اولین بار عضو همه کانال‌ها شدید! 🎊\n\n"
-                "از اینکه همراه ما هستید سپاسگزاریم. اکنون می‌توانید با استفاده از لینک‌های اختصاصی، فایل‌ها را دریافت کنید.\n\n"
-                "🌟 اگر سوالی داشتید، ما همیشه اینجا هستیم!"
-            )
-            user_joined_collection.insert_one({"user_id": user_id})
+            if not user_record:
+                user_joined_collection.insert_one({"user_id": user_id})
+                await callback_query.answer("✅ عضویت شما تایید شد!", show_alert=True)
+                await callback_query.message.edit(
+                    "🎉 تبریک! شما برای اولین بار عضو همه کانال‌ها شدید! 🎊\n\n"
+                    "از اینکه همراه ما هستید سپاسگزاریم. اکنون می‌توانید با استفاده از لینک‌های اختصاصی، فایل‌ها را دریافت کنید.\n\n"
+                    "🌟 اگر سوالی داشتید، ما همیشه اینجا هستیم!"
+                )
+            else:
+                await callback_query.answer("✅ عضویت شما تایید شد!", show_alert=True)
+                await callback_query.message.edit(
+                    "🎉 شما عضو همه کانال‌ها هستید.\n\n"
+                    "برای دریافت فایل روی لینک‌های اختصاصی کلیک کنید."
+                )
         else:
-            await callback_query.answer("✅ عضویت شما تایید شد!", show_alert=True)
+            await callback_query.answer("❌ هنوز عضو همه کانال‌ها نیستید!", show_alert=True)
             await callback_query.message.edit(
-                "🎉 شما عضو همه کانال‌ها هستید.\n\n"
-                "برای دریافت فایل روی لینک‌های اختصاصی کلیک کنید."
+                "❗️ لطفاً ابتدا در همه کانال‌های زیر عضو شوید و سپس روی دکمه 'عضو شدم' بزنید:",
+                reply_markup=get_subscribe_buttons()
             )
-    else:
-        await callback_query.answer("❌ هنوز عضو همه کانال‌ها نیستید!", show_alert=True)
-        await callback_query.message.edit(
-            "❗️ لطفاً ابتدا در همه کانال‌های زیر عضو شوید و سپس روی دکمه 'عضو شدم' بزنید:",
-            reply_markup=get_subscribe_buttons()
-        )
+    except Exception as e:
+        logging.error(f"Error in check_subscription: {e}")
+        await callback_query.answer("❌ خطایی رخ داده است!", show_alert=True)
 
 @bot.on_message(filters.private & filters.video)
 async def video_handler(client, message):
@@ -236,9 +250,16 @@ async def more_files_no(client, callback_query):
         return
 
     film_id = upload.get("film_id")
-    custom_link_text = upload.get("custom_link_text")
-    if not custom_link_text:
-        custom_link_text = "برای دانلود این فیلم کلیک کنید"
+    custom_link_text = upload.get("custom_link_text") or "برای دانلود این فیلم کلیک کنید"
+
+    # ذخیره نهایی فایل و اطلاعاتش تو مجموعه files
+    new_file_doc = {
+        "film_id": film_id,
+        "file_id": upload.get("video_file_id"),
+        "caption": upload.get("caption"),
+        "quality": upload.get("quality"),
+    }
+    files_collection.insert_one(new_file_doc)
 
     uploads_in_progress.delete_one({"user_id": user_id})
 
@@ -257,7 +278,7 @@ async def delete_messages_after(client, messages, delay=30):
     for msg in messages:
         try:
             await msg.delete()
-        except:
+        except Exception:
             pass
 
 if __name__ == "__main__":
