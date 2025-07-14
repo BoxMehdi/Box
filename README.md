@@ -1,19 +1,19 @@
-<h1 align="center" style="color:#e50914;font-family:sans-serif;">🍿 BoxOfficeUploaderBot</h1>
+<h1 align="center">🍿 BoxOfficeUploaderBot</h1>
 
 <p align="center">
-  <img src="https://media.giphy.com/media/3o6Mb43rC2l4P2N7As/giphy.gif" width="270"/>
+  <img src="https://media.giphy.com/media/fAnEC88LccN7a/giphy.gif" width="240" alt="Cinematic Bot"/>
 </p>
 
-<p align="center" style="color:#f5c518;font-size:18px;">
-  🎞️ یه ربات نیست... یه سینمای متحرکه!<br><br>
-  فقط یه کلیک تا دنیایی از کیفیت، انحصار و سرعت ⚡
+<p align="center">
+  <b>بشین. ریلکس کن. و تماشا کن که چطور یه ربات، سینما رو میاره توی موبایلت.</b>
 </p>
 
-<p align="center" style="color:#ffffff;font-size:16px;">
-  بدون دردسر. بدون پیچیدگی. فقط لذت.
+<p align="center">
+  👁‍🗨 لینک‌هایی که فقط مخصوص تو هستن  
+  ⏳ فایل‌هایی که درست سر وقت می‌رسن  
+  🔒 بدون عضویت؟ هیچ‌چیز نمی‌بینی  
+  🧠 و یه ذهن که می‌دونه کِی و چی رو نشونت بده...
 </p>
-
----
 
 <p align="center">
   <a href="https://t.me/YourBotUsername?start=start123">
@@ -21,12 +21,12 @@
   </a>
 </p>
 
----
-
-<p align="center" style="color:#aaa;font-style:italic;">
-  «وقتی همه خوابن، فقط ربات تو بیداره...» 🕶️
+<p align="center">
+  <i>تو فقط کلیک کن... بقیه‌ش با ما 🎥</i>
 </p>
 
+---
+
 <p align="center">
-  <sub style="color:#fff;">Built with ❤️ by <a href="https://t.me/YourTelegramUsername" style="color:#f5c518;">@MehdiEsmaili</a></sub>
+  <sub>Made with ❤️ by <a href="https://t.me/YourTelegramUsername">Mehdi Esmaili</a></sub>
 </p>
