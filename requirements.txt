@@ -1,0 +1,21 @@
+# Pyrogram Telegram API Client
+pyrogram==2.0.106
+
+# tgcrypto برای سرعت و امنیت بیشتر Pyrogram
+tgcrypto==1.2.5
+
+# برای ارتباط با MongoDB
+pymongo==4.13.2
+dnspython==2.7.0
+
+# برای بارگذاری متغیرهای محیطی از فایل .env
+python-dotenv==1.0.1
+
+# برای زمان‌بندی پست‌ها
+apscheduler==3.10.4
+
+# منطقه زمانی
+pytz==2025.2
+
+# سرور Flask برای keep-alive (برای Render یا UptimeRobot)
+flask==3.0.3
