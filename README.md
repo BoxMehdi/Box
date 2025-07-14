@@ -1,34 +1,32 @@
-<h1 align="center">🎬 BoxOfficeUploaderBot</h1>
+<h1 align="center" style="color:#e50914;font-family:sans-serif;">🍿 BoxOfficeUploaderBot</h1>
 
 <p align="center">
-  <b>یک ربات حرفه‌ای برای اشتراک فیلم و سریال با کیفیت‌های مختلف، لینک‌های اختصاصی، و عضویت اجباری</b><br>
-  <sub>همه‌چیز در یک فایل ساده: <code>main.py</code> 🔥</sub>
+  <img src="https://media.giphy.com/media/3o6Mb43rC2l4P2N7As/giphy.gif" width="270"/>
 </p>
 
-<p align="center">
-  <img src="https://media.giphy.com/media/3oKIPnAiaMCws8nOsE/giphy.gif" width="220"/>
+<p align="center" style="color:#f5c518;font-size:18px;">
+  🎞️ یه ربات نیست... یه سینمای متحرکه!<br><br>
+  فقط یه کلیک تا دنیایی از کیفیت، انحصار و سرعت ⚡
+</p>
+
+<p align="center" style="color:#ffffff;font-size:16px;">
+  بدون دردسر. بدون پیچیدگی. فقط لذت.
 </p>
 
 ---
 
-## 🚀 ویژگی‌های ویژه
-
-✅ فقط ادمین اجازه آپلود دارد  
-✅ ذخیره فایل‌ها با جزئیات در MongoDB  
-✅ ارسال لینک اختصاصی برای دانلود مستقیم  
-✅ بررسی عضویت در ۴ کانال پیش از نمایش فایل  
-✅ ارسال پیام خوش‌آمد ویژه فقط بار اول  
-✅ دکمه ادامه آپلود برای فیلم‌های چند کیفیتی  
-✅ حذف خودکار پیام‌ها پس از ۳۰ ثانیه ⏱  
-✅ همیشه آنلاین با Flask + UptimeRobot 🌐  
-✅ همه‌چیز در یک فایل، بدون نیاز به `.env` یا ماژول جداگانه!
+<p align="center">
+  <a href="https://t.me/YourBotUsername?start=start123">
+    <img src="https://img.shields.io/badge/🎬 شروع کن با ربات-000000?style=for-the-badge&logo=telegram&logoColor=white" />
+  </a>
+</p>
 
 ---
 
-## 📦 نصب و اجرا
+<p align="center" style="color:#aaa;font-style:italic;">
+  «وقتی همه خوابن، فقط ربات تو بیداره...» 🕶️
+</p>
 
-```bash
-git clone https://github.com/YourUsername/BoxOfficeUploaderBot.git
-cd BoxOfficeUploaderBot
-pip install -r requirements.txt
-python main.py
+<p align="center">
+  <sub style="color:#fff;">Built with ❤️ by <a href="https://t.me/YourTelegramUsername" style="color:#f5c518;">@MehdiEsmaili</a></sub>
+</p>
