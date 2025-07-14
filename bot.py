@@ -1,3 +1,4 @@
+import os
 import asyncio
 import threading
 from pyrogram import Client, filters
@@ -6,6 +7,7 @@ from pymongo import MongoClient
 from urllib.parse import quote_plus
 from flask import Flask
 
+# ====== تنظیمات اصلی ======
 API_ID = 26438691
 API_HASH = "b9a6835fa0eea6e9f8a320b3ab1ae"
 BOT_TOKEN = "8031070707:AAEf5KDsmxL2x1_iZ_A1PgrGuqPL29TaW8A"
@@ -15,6 +17,7 @@ MONGO_USER = "BoxOffice"
 MONGO_PASS = "136215"
 MONGO_CLUSTER = "boxofficeuploaderbot.2howsv3.mongodb.net"
 
+# ====== اتصال به MongoDB ======
 MONGO_PASS_ENCODED = quote_plus(MONGO_PASS)
 MONGO_URI = f"mongodb+srv://{MONGO_USER}:{MONGO_PASS_ENCODED}@{MONGO_CLUSTER}/?retryWrites=true&w=majority&appName=BoxOfficeUploaderBot"
 mongo_client = MongoClient(MONGO_URI)
@@ -23,6 +26,7 @@ files_collection = db["files"]
 user_joined_collection = db["user_joined"]
 uploads_in_progress = db["uploads_in_progress"]
 
+# ====== کانال‌های اجباری ======
 REQUIRED_CHANNELS = [
     "BoxOffice_Animation",
     "BoxOfficeMoviiie",
@@ -30,6 +34,7 @@ REQUIRED_CHANNELS = [
     "BoxOfficeGoftegu"
 ]
 
+# ====== Flask برای Keep Alive ======
 app = Flask("")
 
 @app.route("/")
@@ -37,14 +42,17 @@ def home():
     return "I am alive!"
 
 def run_flask():
-    app.run(host="0.0.0.0", port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
 
 def keep_alive():
     t = threading.Thread(target=run_flask)
     t.start()
 
+# ====== ساخت کلاینت ربات ======
 bot = Client("boxoffice_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
+# ====== چک کردن عضویت کاربر ======
 async def user_is_subscribed(client, user_id):
     for channel in REQUIRED_CHANNELS:
         try:
@@ -55,11 +63,13 @@ async def user_is_subscribed(client, user_id):
             return False
     return True
 
+# ====== دکمه‌های عضویت ======
 def get_subscribe_buttons():
     buttons = [[InlineKeyboardButton(f"عضویت در @{chan}", url=f"https://t.me/{chan}")] for chan in REQUIRED_CHANNELS]
     buttons.append([InlineKeyboardButton("✅ عضو شدم", callback_data="check_subscription")])
     return InlineKeyboardMarkup(buttons)
 
+# ====== دکمه‌های سوال بعدی فایل ======
 def get_more_files_buttons():
     return InlineKeyboardMarkup([
         [
@@ -68,6 +78,7 @@ def get_more_files_buttons():
         ]
     ])
 
+# ====== هندلر استارت ======
 @bot.on_message(filters.private & filters.command("start"))
 async def start_handler(client, message):
     user_id = message.from_user.id
@@ -120,6 +131,7 @@ async def start_handler(client, message):
         reply_markup=get_subscribe_buttons()
     )
 
+# ====== هندلر دکمه بررسی عضویت ======
 @bot.on_callback_query(filters.regex("^check_subscription$"))
 async def check_subscription(client, callback_query):
     user_id = callback_query.from_user.id
@@ -146,6 +158,7 @@ async def check_subscription(client, callback_query):
             reply_markup=get_subscribe_buttons()
         )
 
+# ====== هندلر آپلود ویدیو ======
 @bot.on_message(filters.private & filters.video)
 async def handle_video_upload(client, message):
     user_id = message.from_user.id
@@ -160,6 +173,7 @@ async def handle_video_upload(client, message):
     )
     await message.reply("✅ ویدیو دریافت شد. لطفاً شناسه عددی فیلم را وارد کنید:")
 
+# ====== هندلر آپلود عکس کاور ======
 @bot.on_message(filters.private & filters.photo)
 async def photo_handler(client, message):
     user_id = message.from_user.id
@@ -188,6 +202,7 @@ async def photo_handler(client, message):
         reply_markup=get_more_files_buttons()
     )
 
+# ====== دکمه‌های فایل بیشتر - بله ======
 @bot.on_callback_query(filters.regex("^more_files_yes$"))
 async def more_files_yes(client, callback_query):
     user_id = callback_query.from_user.id
@@ -197,6 +212,7 @@ async def more_files_yes(client, callback_query):
     )
     await callback_query.message.edit("🎥 لطفاً فایل ویدیویی بعدی را ارسال کنید.")
 
+# ====== دکمه‌های فایل بیشتر - خیر ======
 @bot.on_callback_query(filters.regex("^more_files_no$"))
 async def more_files_no(client, callback_query):
     user_id = callback_query.from_user.id
@@ -216,6 +232,7 @@ async def more_files_no(client, callback_query):
         disable_web_page_preview=True
     )
 
+# ====== هندلر دریافت متن برای مرحله‌های آپلود ======
 @bot.on_message(filters.private & filters.text)
 async def handle_text_steps(client, message):
     user_id = message.from_user.id
@@ -246,38 +263,11 @@ async def handle_text_steps(client, message):
     elif step == "awaiting_quality":
         uploads_in_progress.update_one(
             {"user_id": user_id},
-            {"$set": {"quality": text}}
+            {"$set": {"quality": text, "step": "awaiting_cover"}}
         )
+        await message.reply("🖼️ لطفاً حالا عکس کاور فیلم را ارسال کنید:")
 
-        film_id = upload.get("film_id")
-        cover_entry = files_collection.find_one({"film_id": film_id, "cover_file_id": {"$exists": True}})
-
-        if cover_entry:
-            uploads_in_progress.update_one(
-                {"user_id": user_id},
-                {"$set": {"cover_file_id": cover_entry["cover_file_id"]}}
-            )
-
-            uploads_data = uploads_in_progress.find_one({"user_id": user_id})
-            files_collection.insert_one({
-                "film_id": uploads_data["film_id"],
-                "file_id": uploads_data["video_file_id"],
-                "caption": uploads_data["caption"],
-                "quality": uploads_data["quality"],
-                "cover_file_id": uploads_data["cover_file_id"]
-            })
-
-            await message.reply(
-                "🖼️ کاور قبلاً ذخیره شده، حالا اطلاعات ذخیره می‌شود. اگر فایل دیگری داری ارسال کن، یا 'تمام شد' را بگو.",
-                reply_markup=get_more_files_buttons()
-            )
-        else:
-            uploads_in_progress.update_one(
-                {"user_id": user_id},
-                {"$set": {"step": "awaiting_cover"}}
-            )
-            await message.reply("🖼️ لطفاً حالا عکس کاور فیلم را ارسال کنید:")
-
+# ====== حذف پیام‌ها بعد از 30 ثانیه ======
 async def delete_messages_after(client, messages, delay=30):
     await asyncio.sleep(delay)
     for msg in messages:
@@ -286,6 +276,7 @@ async def delete_messages_after(client, messages, delay=30):
         except:
             pass
 
+# ====== اجرای ربات ======
 if __name__ == "__main__":
     keep_alive()
     bot.run()
