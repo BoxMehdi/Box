@@ -1,3 +1,6 @@
+@app.on_message(filters.command("ping") & filters.private)
+async def ping(client, message):
+    await message.reply("pong ✅")
 from pyrogram.idle import idle
 import os
 import asyncio
