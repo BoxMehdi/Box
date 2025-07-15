@@ -1,8 +1,18 @@
 services:
-  - type: worker
-    name: boxoffice-uploader-bot
+  - type: web
+    name: boxoffice-uploaderbot
     env: python
-    region: frankfurt
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python bot.py"
-    autoDeploy: true
+    plan: free
+    envVars:
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
