@@ -12,7 +12,29 @@ services:
         sync: false
       - key: BOT_TOKEN
         sync: false
+      - key: BOT_USERNAME
+        sync: false
       - key: MONGO_URI
         sync: false
       - key: ADMIN_IDS
+        sync: false
+      - key: REQUIRED_CHANNELS
+        sync: false
+      - key: FLASK_HOST
+        sync: false
+      - key: FLASK_PORT
+        sync: false
+      - key: RENDER_DEPLOYMENT
+        sync: false
+      - key: TIMEZONE
+        sync: false
+      - key: DELETE_DELAY_SECONDS
+        sync: false
+      - key: WELCOME_IMAGE_URL
+        sync: false
+      - key: WELCOME_MESSAGE
+        sync: false
+      - key: FILES_MESSAGE
+        sync: false
+      - key: DELETE_WARNING
         sync: false
