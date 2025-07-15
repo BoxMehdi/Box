@@ -1,3 +1,4 @@
+from pyrogram.idle import idle
 import os
 import asyncio
 from pyrogram import Client, filters
@@ -196,5 +197,14 @@ async def more_files_no(client, callback_query):
     )
 
 # اجرای ربات
+async def main():
+    await app.start()
+    print("✅ Bot started")
+    await idle()
+    await app.stop()
+
 if __name__ == "__main__":
-    app.run()
+    loop = asyncio.get_event_loop()
+    Thread(target=run).start()  # اجرای Flask در Thread جدا
+    loop.run_until_complete(main())
+
