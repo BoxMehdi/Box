@@ -2,7 +2,7 @@ import os
 import asyncio
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pyrogram import Client, filters, idle
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ChatMemberUpdated
 from pyrogram.errors import FloodWait
@@ -92,7 +92,7 @@ async def start(client, message: Message):
         await message.reply("📛 برای استفاده از ربات ابتدا در کانال‌های زیر عضو شوید:", reply_markup=get_subscription_keyboard())
         return
 
-    users_col.update_one({"_id": user_id}, {"$set": {"joined": True}}, upsert=True)
+    users_col.update_one({"_id": user_id}, {"$set": {"joined": datetime.now(timezone.utc)}}, upsert=True)
 
     if len(args) == 2:
         film_id = args[1]
