@@ -13,6 +13,10 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pymongo import MongoClient
 from dotenv import load_dotenv
+from keep_alive import keep_alive
+
+# Run keep-alive HTTP server
+keep_alive()
 
 # Load environment variables
 load_dotenv()
@@ -109,7 +113,7 @@ async def start_command(client, message):
             files_collection.update_one({"file_id": file["file_id"]}, {"$inc": {"views": 1}})
             caption = f"{file['caption']}\n👁 {file.get('views', 0)} | 📥 {file.get('downloads', 0)} | 🔁 {file.get('shares', 0)}"
             short_id = file.get("short_id", "")
-            buttons = InlineKeyboardMarkup([[
+            buttons = InlineKeyboardMarkup([[ 
                 InlineKeyboardButton("📥 دانلود", callback_data=f"dl|{short_id}"),
                 InlineKeyboardButton("📊 آمار", callback_data=f"st|{short_id}")
             ]])
