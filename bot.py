@@ -152,8 +152,15 @@ async def start_bot():
     await idle()
 
 if __name__ == "__main__":
+    import sys
     try:
         asyncio.run(start_bot())
+    except FloodWait as e:
+        wait_time = e.value + 10
+        logging.warning(f"🕒 FloodWait: {e.value} ثانیه صبر...")
+        time.sleep(wait_time)
+        os.execv(sys.executable, ['python'] + sys.argv)
     except Exception as e:
         logging.error(f"❌ خطای غیرمنتظره: {e}")
+
        
