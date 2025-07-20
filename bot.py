@@ -156,3 +156,4 @@ if __name__ == "__main__":
         asyncio.run(start_bot())
     except Exception as e:
         logging.error(f"❌ خطای غیرمنتظره: {e}")
+       
