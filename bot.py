@@ -72,7 +72,8 @@ def export():
     return send_file(output, mimetype='text/csv', download_name="stats.csv")
 
 def run_flask():
-    app.run(host="0.0.0.0", port=8080)
+    PORT = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=PORT)
 
 # Start Flask in background
 threading.Thread(target=run_flask, daemon=True).start()
