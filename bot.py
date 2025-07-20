@@ -1,17 +1,15 @@
 import asyncio
 import threading
 import os
-import logging
 from datetime import datetime
-from io import StringIO
 
-from flask import Flask, send_file
+from flask import Flask
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
-# Load environment variables
+# بارگذاری متغیرها
 load_dotenv()
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
@@ -19,12 +17,10 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS").split(",")))
 MONGO_URI = os.getenv("MONGO_URI")
 
-# MongoDB setup
 client = MongoClient(MONGO_URI)
 db = client["boxoffice_db"]
 files_collection = db["files"]
 
-# Channels required
 REQUIRED_CHANNELS = [
     "BoxOffice_Animation",
     "BoxOfficeMoviiie",
@@ -32,37 +28,12 @@ REQUIRED_CHANNELS = [
     "BoxOfficeGoftegu"
 ]
 
-# Flask App
 app = Flask(__name__)
 uploads_in_progress = {}
 
 @app.route("/")
 def home():
-    return "✅ Bot is alive!"
-
-@app.route("/qr/<film_id>")
-def qr(film_id):
-    link = f"https://t.me/BoxOfficeUploaderbot?start={film_id}"
-    img = qrcode.make(link)
-    path = f"qr_{film_id}.png"
-    img.save(path)
-    return send_file(path, mimetype='image/png')
-
-@app.route("/export")
-def export():
-    output = StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["Film Name", "Quality", "Views", "Downloads", "Shares"])
-    for file in files_collection.find():
-        writer.writerow([
-            file.get("name", ""),
-            file.get("quality", ""),
-            file.get("views", 0),
-            file.get("downloads", 0),
-            file.get("shares", 0)
-        ])
-    output.seek(0)
-    return send_file(output, mimetype='text/csv', download_name="stats.csv")
+    return "✅ Bot is running!"
 
 def run_flask():
     app.run(host="0.0.0.0", port=8080)
@@ -87,7 +58,7 @@ async def start(client, message):
     if len(args) == 2:
         film_id = args[1]
 
-        # Check channel subscriptions
+        # بررسی عضویت در کانال‌ها
         for ch in REQUIRED_CHANNELS:
             try:
                 member = await client.get_chat_member(ch, user_id)
@@ -209,11 +180,12 @@ async def handle_video(client, message):
 async def handle_more_files(client, query):
     user_id = query.from_user.id
     data = uploads_in_progress.get(user_id)
-
     if not data:
-        return await query.answer("❌ عملیات نامعتبر.", show_alert=True)
+        return await query.answer("⛔ خطا.", show_alert=True)
 
     if query.data == "more_yes":
+        if data["stage"] != "awaiting_more":
+            return
         data["stage"] = "awaiting_video"
         await query.message.reply("📤 لطفاً فایل بعدی را ارسال کنید:")
     else:
@@ -223,23 +195,8 @@ async def handle_more_files(client, query):
         film_id = data["film_id"]
         del uploads_in_progress[user_id]
 
-        # ارسال فایل‌ها همان لحظه
-        files = list(files_collection.find({"film_id": film_id}))
-        sent_msgs = []
-        for file in files:
-            caption = f"{file['caption']}\n👁 {file.get('views', 0)} | 📥 {file.get('downloads', 0)} | 🔁 {file.get('shares', 0)}"
-            buttons = InlineKeyboardMarkup([[ 
-                InlineKeyboardButton("📥 دانلود", callback_data=f"download_{file['file_id']}"),
-                InlineKeyboardButton("🔁 اشتراک", callback_data=f"share_{file['file_id']}"),
-                InlineKeyboardButton("📊 آمار", callback_data=f"stats_{file['file_id']}")
-            ]])
-            msg = await query.message.reply_video(file["file_id"], caption=caption, reply_markup=buttons)
-            sent_msgs.append(msg)
-
-        warn = await query.message.reply(
-            f"🔗 لینک دسترسی:\nhttps://t.me/BoxOfficeUploaderbot?start={film_id}\n\n⚠️ فایل‌ها تا ۳۰ ثانیه دیگر حذف می‌شوند!"
+        await query.message.reply(
+            f"✅ آپلود کامل شد!\n\n🔗 لینک برای کاربران:\nhttps://t.me/BoxOfficeUploaderbot?start={film_id}\n⚠️ فایل‌ها فقط تا ۳۰ ثانیه قابل نمایش هستند!"
         )
-        sent_msgs.append(warn)
-        asyncio.create_task(delete_later(sent_msgs))
 
 bot.run()
