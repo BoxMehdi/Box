@@ -133,8 +133,8 @@ async def greet_new_member(client, event: ChatMemberUpdated):
     if event.new_chat_member.status in ("member", "creator") and event.old_chat_member.status == "left":
         try:
             name = event.new_chat_member.user.first_name
-            text = f"🎉 خوش آمدی {name} عزیز به جمع باکس‌آفیسی‌ها!
-از فیلم و سریال‌های ما لذت ببر 🎬🍿"
+            text = f"""🎉 خوش آمدی {name} عزیز به جمع باکس‌آفیسی‌ها!
+از فیلم و سریال‌های ما لذت ببر 🎬🍿"""
             await client.send_message(event.chat.id, text)
         except:
             pass
