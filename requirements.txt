@@ -1,6 +1,6 @@
-pyrogram
+pyrogram==2.0.106
 tgcrypto
+Flask
 pymongo
-flask
-apscheduler
 python-dotenv
+qrcode
