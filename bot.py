@@ -203,3 +203,8 @@ if __name__ == "__main__":
     nest_asyncio.apply()
     keep_alive()
     asyncio.run(start_bot())
+    @app.on_message(filters.command("ping"))
+async def ping(client, message):
+    print("📥 ping received")
+    await message.reply("pong 🏓")
+
