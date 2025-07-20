@@ -13,9 +13,9 @@ from io import BytesIO
 # ==== تنظیمات ربات ====
 API_ID = 26438691
 API_HASH = "b9a6835fa0eea6e9f8a87a320b3ab1ae"
-BOT_TOKEN = "8172767693:AAHdIxn6ueG6HaWFtv4WDH3MjLOmZQPNZQM"
+BOT_TOKEN = "8031070707:AAEQXSV9QGNgH4Hb6_ujsb1kE-DVOVvOmAU"
 ADMIN_IDS = [7872708405, 6867380442]
-CHANNEL_IDS = [-1002422139602, -1002601782167, -1002573288143, -1001476871294]  # 4 کانال / گروه
+CHANNEL_IDS = [-1002422139602, -1002601782167, -1002573288143, -1001476871294]
 
 # ==== اتصال به MongoDB ====
 MONGO_URI = "mongodb+srv://BoxOffice:136215@boxofficeuploaderbot.2howsv3.mongodb.net/?retryWrites=true&w=majority&appName=BoxOfficeUploaderBot"
@@ -26,10 +26,7 @@ users_col = db["users"]
 
 app = Client("BoxOfficeUploaderBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# ==== نگهدارنده وضعیت آپلود ====
 upload_cache = {}
-
-# ==== بازه حالت سکوت ====
 SILENT_START = time(22, 0)
 SILENT_END = time(10, 0)
 
@@ -62,7 +59,6 @@ async def is_subscribed(user_id):
             return False
     return True
 
-# ==== هندلر شروع ====
 @app.on_message(filters.command("start"))
 async def start(client, message: Message):
     user_id = message.from_user.id
@@ -101,7 +97,6 @@ async def start(client, message: Message):
     else:
         await message.reply("برای دریافت فیلم، روی لینک اختصاصی داخل پست‌های کانال کلیک کنید.")
 
-# ==== آپلود فایل توسط ادمین ====
 @app.on_message(filters.document & filters.user(ADMIN_IDS))
 async def admin_upload(client, message: Message):
     upload_cache[message.from_user.id] = {
@@ -145,7 +140,6 @@ async def admin_text(client, message: Message):
 
         del upload_cache[user_id]
 
-# ==== هندلر دکمه‌ها ====
 @app.on_callback_query()
 async def callback_handler(client, callback: CallbackQuery):
     data = callback.data
@@ -179,7 +173,6 @@ async def callback_handler(client, callback: CallbackQuery):
     elif data == "upload_more":
         await callback.message.reply("📤 لطفاً فایل بعدی را ارسال کنید.")
 
-# ==== اجرای امن با مدیریت FloodWait ====
 async def start_bot():
     while True:
         try:
@@ -188,7 +181,7 @@ async def start_bot():
             await idle()
             break
         except FloodWait as e:
-            print(f"🚫 FloodWait: صبر {e.value} ثانیه‌ای لازم است.")
+            print(f"⏳ FloodWait: {e.value} ثانیه صبر کنید.")
             await asyncio.sleep(e.value)
         except Exception as ex:
             logging.exception("❌ خطای غیرمنتظره:")
