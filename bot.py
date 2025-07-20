@@ -79,7 +79,7 @@ def run_flask():
 threading.Thread(target=run_flask, daemon=True).start()
 
 # Start bot
-bot = Client("boxoffice", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+bot = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 async def delete_later(messages, delay=30):
     await asyncio.sleep(delay)
