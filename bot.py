@@ -1,5 +1,3 @@
-from keep_alive import run as keep_alive
-keep_alive()
 import asyncio
 import threading
 import os
@@ -71,8 +69,6 @@ def export():
 
 def run_flask():
     app.run(host="0.0.0.0", port=8080)
-
-threading.Thread(target=run_flask, daemon=True).start()
 
 bot = Client("boxoffice", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
@@ -212,4 +208,6 @@ async def handle_text(client, message):
         )
         del upload_status[user_id]
 
-bot.run()
+if __name__ == "__main__":
+    threading.Thread(target=run_flask, daemon=True).start()
+    bot.run()
