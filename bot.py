@@ -88,9 +88,12 @@ def generate_film_id_from_text(text):
 async def start(client, message: Message):
     user_id = message.from_user.id
     args = message.command
-    if not await is_subscribed(user_id):
-        await message.reply("📛 برای استفاده از ربات ابتدا در کانال‌های زیر عضو شوید:", reply_markup=get_subscription_keyboard())
-        return
+    logging.info(f"/start command received from {user_id} with args: {args}")
+
+    # موقتاً عضویت چک نمی‌کنیم برای تست
+    # if not await is_subscribed(user_id):
+    #     await message.reply("📛 برای استفاده از ربات ابتدا در کانال‌های زیر عضو شوید:", reply_markup=get_subscription_keyboard())
+    #     return
 
     users_col.update_one({"_id": user_id}, {"$set": {"joined": datetime.now(timezone.utc)}}, upsert=True)
 
