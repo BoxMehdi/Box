@@ -14,6 +14,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, 
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from keep_alive import keep_alive
+import nest_asyncio
 
 # Run keep-alive HTTP server
 keep_alive()
@@ -217,4 +218,12 @@ async def handle_text(client, message):
         )
         del upload_status[user_id]
 
-bot.run()
+# Fix event loop issue in some environments
+nest_asyncio.apply()
+
+async def main():
+    await bot.start()
+    await idle()
+
+from pyrogram.idle import idle
+asyncio.run(main())
