@@ -1,216 +1,201 @@
-import asyncio
-import threading
-import os
-import logging
-from datetime import datetime, time
-from urllib.parse import urlparse
-from dotenv import load_dotenv
-from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+# bot.py
+import asyncio, logging
+from pyrogram import Client, filters, idle
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
+from pyrogram.errors import FloodWait
 from pymongo import MongoClient
+from datetime import datetime, time
+from urllib.parse import quote_plus
+from keep_alive import keep_alive
+import qrcode
+from io import BytesIO
 
-# Load env
-load_dotenv()
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS").split(",")))
-MONGO_URI = os.getenv("MONGO_URI")
+# ==== تنظیمات ربات ====
+API_ID = 26438691
+API_HASH = "b9a6835fa0eea6e9f8a87a320b3ab1ae"
+BOT_TOKEN = "8172767693:AAHdIxn6ueG6HaWFtv4WDH3MjLOmZQPNZQM"
+ADMIN_IDS = [7872708405, 6867380442]
+CHANNEL_IDS = [-1002422139602, -1002601782167, -1002573288143, -1001476871294]  # 4 کانال / گروه
 
-client = MongoClient(MONGO_URI)
-db = client["boxoffice_db"]
-files_collection = db["files"]
+# ==== اتصال به MongoDB ====
+MONGO_URI = "mongodb+srv://BoxOffice:136215@boxofficeuploaderbot.2howsv3.mongodb.net/?retryWrites=true&w=majority&appName=BoxOfficeUploaderBot"
+mongo_client = MongoClient(MONGO_URI)
+db = mongo_client["BoxOfficeUploaderBot"]
+films_col = db["films"]
+users_col = db["users"]
 
-REQUIRED_CHANNELS = [
-    "BoxOffice_Animation",
-    "BoxOfficeMoviiie",
-    "BoxOffice_Irani",
-    "BoxOfficeGoftegu"
-]
+app = Client("BoxOfficeUploaderBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-SILENT_START = 22
-SILENT_END = 10
+# ==== نگهدارنده وضعیت آپلود ====
+upload_cache = {}
 
-bot = Client("boxoffice", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-uploads_in_progress = {}
+# ==== بازه حالت سکوت ====
+SILENT_START = time(22, 0)
+SILENT_END = time(10, 0)
 
-# Silent mode checker
 def in_silent_mode():
-    now = datetime.now().hour
-    return now >= SILENT_START or now < SILENT_END
+    now = datetime.now().time()
+    return now >= SILENT_START or now <= SILENT_END
 
-# Delete messages
-async def delete_later(messages, delay=30):
-    await asyncio.sleep(delay)
-    for msg in messages:
+def generate_qr(link):
+    img = qrcode.make(link)
+    buf = BytesIO()
+    buf.name = "qr.png"
+    img.save(buf, format='PNG')
+    buf.seek(0)
+    return buf
+
+def build_buttons(file_id, views, downloads, shares):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"👁 {views} | 📥 {downloads} | 🔁 {shares}", callback_data="noop")],
+        [InlineKeyboardButton("📥 دریافت", callback_data=f"download_{file_id}"),
+         InlineKeyboardButton("📊 آمار", callback_data=f"stats_{file_id}")]
+    ])
+
+async def is_subscribed(user_id):
+    for ch in CHANNEL_IDS:
         try:
-            await msg.delete()
+            member = await app.get_chat_member(ch, user_id)
+            if member.status in ("left", "kicked"):
+                return False
         except:
-            pass
+            return False
+    return True
 
-# Convert links to buttons
-def replace_links_with_buttons(caption):
-    words = caption.split()
-    buttons = []
-    clean_caption = []
-
-    for word in words:
-        if word.startswith("https://t.me/"):
-            parsed = urlparse(word)
-            label = "📥 لینک دانلود"
-            buttons.append([InlineKeyboardButton(label, url=word)])
-        else:
-            clean_caption.append(word)
-
-    return " ".join(clean_caption), buttons
-
-@bot.on_message(filters.command("start") & filters.private)
-async def start_command(client, message: Message):
-    args = message.text.split()
+# ==== هندلر شروع ====
+@app.on_message(filters.command("start"))
+async def start(client, message: Message):
     user_id = message.from_user.id
+    users_col.update_one({"_id": user_id}, {"$set": {"joined_at": datetime.utcnow()}}, upsert=True)
 
-    if len(args) == 2:
-        film_id = args[1]
+    if not await is_subscribed(user_id):
+        markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📢 عضویت در کانال‌ها", url="https://t.me/BoxOffice_Irani")],
+            [InlineKeyboardButton("✅ عضو شدم", callback_data="check_sub")]
+        ])
+        return await message.reply("لطفاً ابتدا در تمام کانال‌ها عضو شوید 👇", reply_markup=markup)
 
-        # Check subscription
-        for ch in REQUIRED_CHANNELS:
-            try:
-                m = await client.get_chat_member(ch, user_id)
-                if m.status in ("left", "kicked"):
-                    raise Exception
-            except:
-                btns = [[InlineKeyboardButton(f"عضویت در @{ch}", url=f"https://t.me/{ch}")] for ch in REQUIRED_CHANNELS]
-                btns.append([InlineKeyboardButton("✅ عضو شدم", callback_data=f"check_{film_id}")])
-                await message.reply("🔐 لطفاً ابتدا در کانال‌های زیر عضو شوید:", reply_markup=InlineKeyboardMarkup(btns))
-                return
+    if len(message.command) == 2:
+        film_id = message.command[1]
+        film = films_col.find_one({"film_id": film_id})
+        if not film:
+            return await message.reply("❌ فیلمی با این شناسه پیدا نشد.")
 
-        # Send files
-        files = list(files_collection.find({"film_id": film_id}))
-        if not files:
-            await message.reply("⛔️ فایلی یافت نشد.")
-            return
+        await message.reply_photo("https://i.imgur.com/HBYNljO.png", caption="🎬 خوش‌آمدید!\nدر ادامه فایل‌های این فیلم را دریافت خواهید کرد.")
 
         sent_msgs = []
-        for file in files:
-            files_collection.update_one({"file_id": file["file_id"]}, {"$inc": {"views": 1}})
-            caption, buttons = replace_links_with_buttons(file["caption"])
-            stats = f"\n👁 {file.get('views', 0)} | 📥 {file.get('downloads', 0)} | 🔁 {file.get('shares', 0)}"
-            btns = InlineKeyboardMarkup(buttons + [[
-                InlineKeyboardButton("📥 دانلود", callback_data=f"download_{file['file_id']}"),
-                InlineKeyboardButton("🔁 اشتراک", callback_data=f"share_{file['file_id']}"),
-                InlineKeyboardButton("📊 آمار", callback_data=f"stats_{file['file_id']}")
-            ]])
-            msg = await message.reply_video(file["file_id"], caption=caption + stats, reply_markup=btns)
+        for file in film["files"]:
+            msg = await message.reply_document(
+                file["file_id"],
+                caption=file["caption"],
+                reply_markup=build_buttons(file["_id"], file["views"], file["downloads"], file["shares"])
+            )
             sent_msgs.append(msg)
 
-        warn = await message.reply("⚠️ فقط ۳۰ ثانیه فرصت دارید فایل‌ها را ذخیره کنید!")
+        warn = await message.reply("⚠️ فایل‌ها تا ۳۰ ثانیه دیگر حذف می‌شوند. لطفاً ذخیره کنید.")
         sent_msgs.append(warn)
-        asyncio.create_task(delete_later(sent_msgs))
+
+        await asyncio.sleep(30)
+        for msg in sent_msgs:
+            await msg.delete()
     else:
-        img = "https://i.imgur.com/HBYNljO.png"
-        btns = [[InlineKeyboardButton(f"عضویت در @{ch}", url=f"https://t.me/{ch}")] for ch in REQUIRED_CHANNELS]
-        btns.append([InlineKeyboardButton("✅ عضو شدم", callback_data="check_generic")])
-        await message.reply_photo(img, caption=f"🎬 خوش آمدی {user_id}!\n📽 برای دریافت فیلم از لینک‌های داخل پست استفاده کن.", reply_markup=InlineKeyboardMarkup(btns))
+        await message.reply("برای دریافت فیلم، روی لینک اختصاصی داخل پست‌های کانال کلیک کنید.")
 
-@bot.on_callback_query(filters.regex("^check_"))
-async def check_callback(client, query: CallbackQuery):
-    film_id = query.data.split("_")[1]
-    user_id = query.from_user.id
-
-    for ch in REQUIRED_CHANNELS:
-        try:
-            m = await client.get_chat_member(ch, user_id)
-            if m.status in ("left", "kicked"):
-                raise Exception
-        except:
-            return await query.answer("⛔️ هنوز عضو همه کانال‌ها نیستید.", show_alert=True)
-
-    await query.answer("✅ عضویت تأیید شد!", show_alert=True)
-
-    if film_id == "generic":
-        try:
-            await query.message.edit("✅ اکنون می‌توانید از لینک‌های داخل پست‌های کانال استفاده کنید.")
-        except:
-            pass
-    else:
-        await client.send_message(query.message.chat.id, f"/start {film_id}")
-
-@bot.on_message(filters.command("upload") & filters.private)
-async def upload_entry(client, message: Message):
-    if message.from_user.id not in ADMIN_IDS:
-        return await message.reply("⛔️ فقط مدیر مجاز است.")
-    uploads_in_progress[message.from_user.id] = {
-        "stage": "awaiting_name",
-        "film_id": str(int(datetime.now().timestamp())),
-        "files": []
+# ==== آپلود فایل توسط ادمین ====
+@app.on_message(filters.document & filters.user(ADMIN_IDS))
+async def admin_upload(client, message: Message):
+    upload_cache[message.from_user.id] = {
+        "step": "awaiting_id",
+        "file_id": message.document.file_id
     }
-    await message.reply("🎬 لطفاً نام فیلم را وارد کنید:")
+    await message.reply("🆔 لطفاً شناسه فیلم را وارد کنید:")
 
-@bot.on_message(filters.private & filters.text)
-async def handle_text(client, message: Message):
+@app.on_message(filters.text & filters.user(ADMIN_IDS))
+async def admin_text(client, message: Message):
     user_id = message.from_user.id
-    if user_id not in uploads_in_progress:
+    if user_id not in upload_cache:
         return
 
-    data = uploads_in_progress[user_id]
-    txt = message.text.strip()
+    data = upload_cache[user_id]
 
-    if data["stage"] == "awaiting_name":
-        data["name"] = txt
-        data["stage"] = "awaiting_video"
-        await message.reply("📤 لطفاً فایل ویدیویی را ارسال کنید:")
+    if data["step"] == "awaiting_id":
+        data["film_id"] = message.text.strip()
+        data["step"] = "awaiting_caption"
+        await message.reply("📝 لطفاً کپشن فایل را وارد کنید:")
 
-    elif data["stage"] == "awaiting_quality":
-        data["quality"] = txt
-        data["stage"] = "awaiting_caption"
-        await message.reply("✍️ لطفاً توضیح فیلم (caption) را وارد کنید:")
-
-    elif data["stage"] == "awaiting_caption":
-        data["files"].append({
-            "film_id": data["film_id"],
-            "file_id": data["current_file_id"],
-            "name": data["name"],
-            "quality": data["quality"],
-            "caption": txt,
+    elif data["step"] == "awaiting_caption":
+        caption = message.text.strip()
+        new_file = {
+            "_id": str(datetime.utcnow().timestamp()),
+            "file_id": data["file_id"],
+            "caption": caption,
             "views": 0,
             "downloads": 0,
             "shares": 0
-        })
-        data["stage"] = "awaiting_more"
-        await message.reply("➕ فایل دیگری دارید؟", reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ بله", callback_data="more_yes"), InlineKeyboardButton("❌ خیر", callback_data="more_no")]
+        }
+
+        film = films_col.find_one({"film_id": data["film_id"]}) or {"film_id": data["film_id"], "files": []}
+        film["files"].append(new_file)
+        films_col.update_one({"film_id": data["film_id"]}, {"$set": film}, upsert=True)
+
+        await message.reply("✅ فایل ذخیره شد. فایل دیگری هم دارید؟", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ بله", callback_data="upload_more")],
+            [InlineKeyboardButton("❌ خیر", callback_data=f"done_{data['film_id']}")]
         ]))
 
-@bot.on_message(filters.private & filters.video)
-async def handle_video(client, message: Message):
-    user_id = message.from_user.id
-    if user_id not in uploads_in_progress:
-        return
+        del upload_cache[user_id]
 
-    data = uploads_in_progress[user_id]
-    if data["stage"] == "awaiting_video":
-        data["current_file_id"] = message.video.file_id
-        data["stage"] = "awaiting_quality"
-        await message.reply("📝 کیفیت ویدیو را وارد کنید (مثلاً 720p):")
+# ==== هندلر دکمه‌ها ====
+@app.on_callback_query()
+async def callback_handler(client, callback: CallbackQuery):
+    data = callback.data
+    user_id = callback.from_user.id
 
-@bot.on_callback_query(filters.regex("^more_"))
-async def handle_more(client, query: CallbackQuery):
-    user_id = query.from_user.id
-    data = uploads_in_progress[user_id]
+    if data == "check_sub":
+        if await is_subscribed(user_id):
+            await callback.message.edit("✅ عضویت تأیید شد. لطفاً مجدد /start بزنید.")
+        else:
+            await callback.answer("❌ هنوز عضو نیستید!", show_alert=True)
 
-    if query.data == "more_yes":
-        data["stage"] = "awaiting_video"
-        await query.message.reply("📤 لطفاً فایل بعدی را ارسال کنید:")
-    else:
-        for f in data["files"]:
-            files_collection.insert_one(f)
-        film_id = data["film_id"]
-        del uploads_in_progress[user_id]
+    elif data.startswith("done_"):
+        film_id = data.split("_")[1]
+        deep_link = f"https://t.me/BoxOfficeUploaderBot?start={film_id}"
+        qr = generate_qr(deep_link)
+        await callback.message.reply_photo(qr, caption=f"🎬 لینک اختصاصی فیلم:\n{deep_link}")
 
-        await query.message.reply(
-            f"✅ فایل‌ها با موفقیت ذخیره شدند!\n\n"
-            f"🔗 لینک اختصاصی: https://t.me/BoxOfficeUploaderbot?start={film_id}\n"
-            f"⏳ فایل‌ها فقط ۳۰ ثانیه در دسترس خواهند بود پس از باز کردن لینک!"
-        )
+    elif data.startswith("download_"):
+        file_id = data.split("_")[1]
+        films_col.update_one({"files._id": file_id}, {"$inc": {"files.$.downloads": 1}})
+        await callback.answer("✅ در حال دانلود...", show_alert=False)
 
-bot.run()
+    elif data.startswith("stats_"):
+        file_id = data.split("_")[1]
+        film = films_col.find_one({"files._id": file_id})
+        for file in film["files"]:
+            if file["_id"] == file_id:
+                stats = f"👁 بازدید: {file['views']} | 📥 دانلود: {file['downloads']} | 🔁 اشتراک: {file['shares']}"
+                await callback.answer(stats, show_alert=True)
+
+    elif data == "upload_more":
+        await callback.message.reply("📤 لطفاً فایل بعدی را ارسال کنید.")
+
+# ==== اجرای امن با مدیریت FloodWait ====
+async def start_bot():
+    while True:
+        try:
+            await app.start()
+            print("✅ Bot started")
+            await idle()
+            break
+        except FloodWait as e:
+            print(f"🚫 FloodWait: صبر {e.value} ثانیه‌ای لازم است.")
+            await asyncio.sleep(e.value)
+        except Exception as ex:
+            logging.exception("❌ خطای غیرمنتظره:")
+            break
+
+if __name__ == "__main__":
+    import nest_asyncio
+    nest_asyncio.apply()
+    keep_alive()
+    asyncio.run(start_bot())
