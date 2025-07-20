@@ -1,147 +1,131 @@
+import os
 import asyncio
 import logging
-from datetime import datetime, time
+from datetime import datetime
+from uuid import uuid4
+from urllib.parse import quote_plus
+from flask import Flask
+from threading import Thread
+
 from pyrogram import Client, filters, idle
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 from pyrogram.errors import FloodWait
 from pymongo import MongoClient
-from urllib.parse import quote_plus
 import qrcode
-from io import BytesIO
-from keep_alive import keep_alive
 
-# ========== تنظیمات ==========
+# ---------- تنظیمات ثابت ----------
 API_ID = 26438691
 API_HASH = "b9a6835fa0eea6e9f8a87a320b3ab1ae"
 BOT_TOKEN = "8031070707:AAEQXSV9QGNgH4Hb6_ujsb1kE-DVOVvOmAU"
 ADMIN_IDS = [7872708405, 6867380442]
-CHANNEL_IDS = [-1002422139602, -1002601782167, -1002573288143, -1001476871294]
+REQUIRED_CHANNELS = [
+    "@BoxOffice_Irani",
+    "@BoxOfficeMoviiie",
+    "@BoxOffice_Animation",
+    "@BoxOfficeGoftegu"
+]
+WELCOME_IMAGE_URL = "https://i.imgur.com/HBYNljO.png"
 MONGO_URI = "mongodb+srv://BoxOffice:136215@boxofficeuploaderbot.2howsv3.mongodb.net/?retryWrites=true&w=majority&appName=BoxOfficeUploaderBot"
 
-# ========== اتصال به MongoDB ==========
-mongo = MongoClient(MONGO_URI)
-db = mongo["BoxOfficeUploaderBot"]
-films_col = db["films"]
-users_col = db["users"]
+# ---------- اتصال به MongoDB ----------
+mongo_client = MongoClient(MONGO_URI)
+db = mongo_client['BoxOfficeUploaderBot']
+films_col = db['films']
 
-# ========== راه‌اندازی ربات ==========
+# ---------- ساخت کلاینت ----------
 app = Client("BoxOfficeUploaderBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-upload_cache = {}
 
-# ========== زمان حالت سکوت ==========
-SILENT_START = time(22, 0)
-SILENT_END = time(10, 0)
+# ---------- اجرای Flask برای Keep Alive ----------
+flask_app = Flask('')
+@flask_app.route('/')
+def home():
+    return "Bot is running."
+def keep_alive():
+    Thread(target=lambda: flask_app.run(host='0.0.0.0', port=8080)).start()
 
-def in_silent():
-    now = datetime.now().time()
-    return now >= SILENT_START or now <= SILENT_END
-
-def generate_qr(link):
-    img = qrcode.make(link)
-    buf = BytesIO()
-    img.save(buf, format="PNG")
-    buf.name = "qr.png"
-    buf.seek(0)
-    return buf
-
-def build_buttons(file_id, views, downloads, shares):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"👁 {views} | 📥 {downloads} | 🔁 {shares}", callback_data="noop")],
-        [InlineKeyboardButton("📥 دریافت", callback_data=f"download_{file_id}"),
-         InlineKeyboardButton("📊 آمار", callback_data=f"stats_{file_id}")]
-    ])
-
+# ---------- بررسی عضویت ----------
 async def is_subscribed(user_id):
-    for ch in CHANNEL_IDS:
+    for ch in REQUIRED_CHANNELS:
         try:
             member = await app.get_chat_member(ch, user_id)
-            if member.status in ("left", "kicked"):
+            if member.status not in ("member", "administrator", "creator"):
                 return False
         except:
             return False
     return True
 
-# ========== استارت ==========
-@app.on_message(filters.command("start"))
-async def start(client, message: Message):
-    user_id = message.from_user.id
-    users_col.update_one({"_id": user_id}, {"$set": {"joined": datetime.utcnow()}}, upsert=True)
+def generate_qr(link):
+    img = qrcode.make(link)
+    path = f"/tmp/{uuid4().hex}.png"
+    img.save(path)
+    return path
 
+# ---------- هندلر start ----------
+@app.on_message(filters.command("start"))
+async def start_cmd(client, message: Message):
+    user_id = message.from_user.id
     if not await is_subscribed(user_id):
         markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 عضویت در کانال‌ها", url="https://t.me/BoxOffice_Irani")],
-            [InlineKeyboardButton("✅ عضو شدم", callback_data="check_sub")]
+            [InlineKeyboardButton("📢 عضویت در کانال‌ها", url="https://t.me/BoxOfficeMoviiie")],
+            [InlineKeyboardButton("✅ عضویت انجام شد", callback_data="check_sub")]
         ])
-        return await message.reply("لطفاً ابتدا در کانال‌ها عضو شوید 👇", reply_markup=markup)
-
-    if len(message.command) == 2:
-        film_id = message.command[1]
-        film = films_col.find_one({"film_id": film_id})
-        if not film:
-            return await message.reply("❌ فیلمی با این شناسه پیدا نشد.")
-
-        await message.reply_photo("https://i.imgur.com/HBYNljO.png", caption="🎬 به آرشیو خوش آمدید!")
-
-        sent = []
-        for f in film["files"]:
-            m = await message.reply_document(
-                f["file_id"],
-                caption=f["caption"],
-                reply_markup=build_buttons(f["_id"], f["views"], f["downloads"], f["shares"]),
-                disable_notification=in_silent()
-            )
-            sent.append(m)
-
-        warn = await message.reply("⏳ فایل‌ها بعد از ۳۰ ثانیه حذف می‌شوند.")
-        sent.append(warn)
-
-        await asyncio.sleep(30)
-        for msg in sent:
-            await msg.delete()
-
-    else:
-        await message.reply("برای دریافت فیلم، روی لینک داخل کانال کلیک کنید.")
-
-# ========== آپلود توسط ادمین ==========
-@app.on_message(filters.document & filters.user(ADMIN_IDS))
-async def upload_file(client, message: Message):
-    upload_cache[message.from_user.id] = {"step": "await_id", "file_id": message.document.file_id}
-    await message.reply("📌 لطفاً شناسه فیلم را وارد کنید:")
-
-@app.on_message(filters.text & filters.user(ADMIN_IDS))
-async def upload_steps(client, message: Message):
-    uid = message.from_user.id
-    if uid not in upload_cache:
+        await message.reply("برای ادامه، لطفاً در کانال‌ها عضو شوید:", reply_markup=markup)
         return
 
-    data = upload_cache[uid]
+    args = message.text.split()
+    if len(args) == 2:
+        film_id = args[1]
+        film = films_col.find_one({"film_id": film_id})
+        if not film:
+            await message.reply("❌ فیلم مورد نظر یافت نشد.")
+            return
 
-    if data["step"] == "await_id":
-        data["film_id"] = message.text.strip()
-        data["step"] = "await_caption"
-        await message.reply("📝 کپشن فایل را وارد کنید:")
+        await message.reply_photo(WELCOME_IMAGE_URL, caption="🎬 به باکس‌آفیس خوش آمدید!")
 
-    elif data["step"] == "await_caption":
-        caption = message.text.strip()
-        new_file = {
-            "_id": str(datetime.utcnow().timestamp()),
-            "file_id": data["file_id"],
-            "caption": caption,
-            "views": 0,
-            "downloads": 0,
-            "shares": 0
-        }
-        film = films_col.find_one({"film_id": data["film_id"]}) or {"film_id": data["film_id"], "files": []}
-        film["files"].append(new_file)
-        films_col.update_one({"film_id": data["film_id"]}, {"$set": film}, upsert=True)
+        for file in film.get("files", []):
+            view_id = str(uuid4().hex)
+            films_col.update_one({"film_id": film_id, "files._id": file["_id"]}, {"$inc": {"files.$.views": 1}})
+            buttons = [
+                [InlineKeyboardButton("⬇️ دانلود", callback_data=f"download_{file['_id']}")],
+                [InlineKeyboardButton("📊 مشاهده آمار", callback_data=f"stats_{file['_id']}")]
+            ]
+            await message.reply_video(file["file_id"], caption=file.get("caption", "🎞 فیلم"), reply_markup=InlineKeyboardMarkup(buttons))
+        await message.reply("⚠️ فایل‌ها در 30 ثانیه دیگر حذف خواهند شد!")
+        await asyncio.sleep(30)
+        async for msg in app.get_chat_history(message.chat.id, limit=10):
+            try:
+                await msg.delete()
+            except: pass
+    else:
+        await message.reply("❌ لینک دانلود نامعتبر است.")
 
-        await message.reply("✅ فایل ذخیره شد. فایل دیگری هم هست؟", reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("➕ بله", callback_data="upload_more")],
-            [InlineKeyboardButton("❌ خیر", callback_data=f"done_{data['film_id']}")]
-        ]))
-        del upload_cache[uid]
+# ---------- هندلر آپلود فایل توسط ادمین ----------
+@app.on_message(filters.video & filters.user(ADMIN_IDS))
+async def handle_upload(client, message: Message):
+    await message.reply("🎬 لطفاً شناسه فیلم را وارد کنید:")
+    response = await app.listen(message.chat.id, timeout=300)
+    film_id = response.text.strip()
 
-# ========== دکمه‌ها ==========
+    await message.reply("📝 لطفاً کپشن فایل را وارد کنید:")
+    caption_msg = await app.listen(message.chat.id, timeout=300)
+    caption = caption_msg.text.strip()
+
+    file_data = {
+        "_id": str(uuid4().hex),
+        "file_id": message.video.file_id,
+        "caption": caption,
+        "views": 0,
+        "downloads": 0,
+        "shares": 0
+    }
+
+    films_col.update_one({"film_id": film_id}, {"$push": {"files": file_data}}, upsert=True)
+    await message.reply("✅ فایل ذخیره شد.", reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton("❌ خیر، فایل دیگری ندارم", callback_data=f"done_{film_id}")],
+        [InlineKeyboardButton("➕ بله، فایل بعدی", callback_data="upload_more")]
+    ]))
+
+# ---------- هندلر کلیک روی دکمه‌ها ----------
 @app.on_callback_query()
 async def callbacks(client, query: CallbackQuery):
     data = query.data
@@ -157,7 +141,8 @@ async def callbacks(client, query: CallbackQuery):
         fid = data.split("_")[1]
         link = f"https://t.me/BoxOfficeUploaderBot?start={fid}"
         qr = generate_qr(link)
-        await query.message.reply_photo(qr, caption=f"📎 لینک اختصاصی:\n{link}")
+        await query.message.reply_photo(qr, caption=f"📎 لینک اختصاصی:
+{link}")
 
     elif data.startswith("download_"):
         fid = data.split("_")[1]
@@ -176,13 +161,12 @@ async def callbacks(client, query: CallbackQuery):
     elif data == "upload_more":
         await query.message.reply("📤 فایل بعدی را ارسال کنید.")
 
-# ========== تست /ping ==========
+# ---------- دستور Ping ----------
 @app.on_message(filters.command("ping"))
 async def ping(client, message):
-    print("📥 ping received")
     await message.reply("pong 🏓")
 
-# ========== اجرای امن ربات ==========
+# ---------- اجرای ربات ----------
 async def start_bot():
     while True:
         try:
