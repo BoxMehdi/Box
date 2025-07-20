@@ -4,6 +4,7 @@ import os
 from datetime import datetime
 from io import StringIO
 from urllib.parse import quote_plus
+import qrcode
 import csv
 import uuid
 
