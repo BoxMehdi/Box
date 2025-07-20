@@ -27,8 +27,8 @@ films_col = db['films']
 users_col = db['users']
 
 # ========== حالت شبانه ==========
-SILENT_MODE_START = 22  # ساعت شروع
-SILENT_MODE_END = 10    # ساعت پایان
+SILENT_MODE_START = 22
+SILENT_MODE_END = 10
 
 def is_silent_mode():
     now = datetime.now().hour
@@ -36,9 +36,8 @@ def is_silent_mode():
         return now >= SILENT_MODE_START or now < SILENT_MODE_END
     return SILENT_MODE_START <= now < SILENT_MODE_END
 
-# ========== اجرای Flask برای Render ==========
+# ========== Flask برای Render ==========
 app_flask = Flask('')
-
 @app_flask.route('/')
 def home():
     return "BoxOfficeUploaderBot is alive!"
@@ -47,9 +46,40 @@ def keep_alive():
     Thread(target=lambda: app_flask.run(host="0.0.0.0", port=8080)).start()
 
 # ========== شروع Pyrogram ==========
-app = Client("BoxOfficeUploaderBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("UploaderBoxOfficeBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# ========== بررسی عضویت کاربر در کانال‌ها ==========
+# ========== زبان‌ها ==========
+LANGUAGES = {
+    "fa": {
+        "welcome": "سلام دوست عزیز 👋\nبه ربات دانلود فیلم و سریال خوش آمدید 🎬\nبرای استفاده از ربات، لطفاً روی لینک‌هایی که در کپشن پست‌های کانال قرار دارد کلیک کنید.",
+        "film_not_found": "❌ فیلم یافت نشد.",
+        "download": "⬇️ دانلود",
+        "stats": "📊 آمار",
+        "joined_msg": "🎉 خوش آمدی {name} عزیز به جمع باکس‌آفیسی‌ها!\nاز فیلم و سریال‌های ما لذت ببر 🎬🍿",
+        "select_language": "لطفاً زبان مورد نظر خود را انتخاب کنید:"
+    },
+    "en": {
+        "welcome": "Hi there 👋\nWelcome to the Movie & Series Downloader Bot 🎬\nClick the links in the channel captions to use the bot.",
+        "film_not_found": "❌ Film not found.",
+        "download": "⬇️ Download",
+        "stats": "📊 Stats",
+        "joined_msg": "🎉 Welcome {name} to the BoxOffice family!\nEnjoy our movies and series 🎬🍿",
+        "select_language": "Please select your preferred language:"
+    }
+}
+
+def get_user_lang(user_id):
+    user = users_col.find_one({"_id": user_id})
+    return user.get("lang", "fa") if user else "fa"
+
+@app.on_callback_query(filters.regex("^lang_"))
+async def set_lang(client, callback: CallbackQuery):
+    lang_code = callback.data.split("_")[1]
+    users_col.update_one({"_id": callback.from_user.id}, {"$set": {"lang": lang_code}}, upsert=True)
+    await callback.answer("Language changed ✅", show_alert=True)
+    await callback.message.edit("زبان تغییر یافت. دوباره /start را بزنید." if lang_code == "fa" else "Language updated. Please tap /start again.")
+
+# ========== بررسی عضویت ==========
 async def is_subscribed(user_id):
     for channel in REQUIRED_CHANNELS:
         try:
@@ -60,7 +90,6 @@ async def is_subscribed(user_id):
             return False
     return True
 
-# ========== دکمه‌های عضویت ==========
 def get_subscription_keyboard():
     buttons = [
         [InlineKeyboardButton("📢 عضویت در کانال 1", url="https://t.me/BoxOffice_Irani")],
@@ -71,11 +100,8 @@ def get_subscription_keyboard():
     ]
     return InlineKeyboardMarkup(buttons)
 
-# ========== پیام خوش‌آمد ==========
 WELCOME_IMAGE = "https://i.imgur.com/HBYNljO.png"
-WELCOME_TEXT = "سلام دوست عزیز 👋\nبه ربات دانلود فیلم و سریال خوش آمدید 🎬\nبرای استفاده از ربات، لطفاً روی لینک‌هایی که در کپشن پست‌های کانال قرار دارد کلیک کنید."
 
-# ========== Utility ==========
 def convert_caption_to_clickable(text):
     pattern = r"قسمت\s+\S+\s+جزر و مد"
     return re.sub(pattern, lambda m: f"[📥 {m.group(0)}](https://t.me/BoxOfficeUploaderBot?start={generate_film_id_from_text(m.group(0))})", text)
@@ -83,17 +109,12 @@ def convert_caption_to_clickable(text):
 def generate_film_id_from_text(text):
     return re.sub(r'\D+', '', text)[-9:] if re.search(r'\d+', text) else "000000000"
 
-# ========== /start ==========
 @app.on_message(filters.command("start"))
 async def start(client, message: Message):
     user_id = message.from_user.id
     args = message.command
-    logging.info(f"/start command received from {user_id} with args: {args}")
-
-    # موقتاً عضویت چک نمی‌کنیم برای تست
-    # if not await is_subscribed(user_id):
-    #     await message.reply("📛 برای استفاده از ربات ابتدا در کانال‌های زیر عضو شوید:", reply_markup=get_subscription_keyboard())
-    #     return
+    lang = get_user_lang(user_id)
+    texts = LANGUAGES[lang]
 
     users_col.update_one({"_id": user_id}, {"$set": {"joined": datetime.now(timezone.utc)}}, upsert=True)
 
@@ -101,7 +122,7 @@ async def start(client, message: Message):
         film_id = args[1]
         film = films_col.find_one({"_id": film_id})
         if film:
-            await message.reply_photo(WELCOME_IMAGE, caption=WELCOME_TEXT)
+            await message.reply_photo(WELCOME_IMAGE, caption=texts["welcome"])
             sent_messages = []
             for f in film["files"]:
                 sent = await message.reply_video(
@@ -109,8 +130,8 @@ async def start(client, message: Message):
                     caption=f"🎬 {film['title']} ({f['quality']})\n{convert_caption_to_clickable(film['caption'])}",
                     reply_markup=InlineKeyboardMarkup([
                         [
-                            InlineKeyboardButton("⬇️ دانلود", callback_data=f"download_{f['_id']}"),
-                            InlineKeyboardButton("📊 آمار", callback_data=f"stats_{f['_id']}")
+                            InlineKeyboardButton(texts["download"], callback_data=f"download_{f['_id']}"),
+                            InlineKeyboardButton(texts["stats"], callback_data=f"stats_{f['_id']}")
                         ]
                     ]),
                     disable_notification=is_silent_mode()
@@ -121,28 +142,28 @@ async def start(client, message: Message):
             for msg in sent_messages:
                 await msg.delete()
         else:
-            await message.reply("❌ فیلم یافت نشد.")
+            await message.reply(texts["film_not_found"])
     else:
-        await message.reply_photo(WELCOME_IMAGE, caption=WELCOME_TEXT)
+        lang_buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🇮🇷 فارسی", callback_data="lang_fa"), InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")]
+        ])
+        await message.reply_photo(WELCOME_IMAGE, caption=texts["select_language"], reply_markup=lang_buttons)
 
-# ========== Ping Test ==========
 @app.on_message(filters.command("ping"))
 async def ping(client, message: Message):
     await message.reply("pong 🏓")
 
-# ========== خوش‌آمد به عضو جدید ==========
 @app.on_chat_member_updated()
 async def greet_new_member(client, event: ChatMemberUpdated):
     if event.new_chat_member.status in ("member", "creator") and event.old_chat_member.status == "left":
         try:
             name = event.new_chat_member.user.first_name
-            text = f"""🎉 خوش آمدی {name} عزیز به جمع باکس‌آفیسی‌ها!
-از فیلم و سریال‌های ما لذت ببر 🎬🍿"""
+            lang = get_user_lang(event.new_chat_member.user.id)
+            text = LANGUAGES[lang]["joined_msg"].format(name=name)
             await client.send_message(event.chat.id, text)
         except:
             pass
 
-# ========== اجرای ربات ==========
 async def start_bot():
     keep_alive()
     logging.basicConfig(level=logging.INFO)
@@ -152,15 +173,7 @@ async def start_bot():
     await idle()
 
 if __name__ == "__main__":
-    import sys
     try:
         asyncio.run(start_bot())
-    except FloodWait as e:
-        wait_time = e.value + 10
-        logging.warning(f"🕒 FloodWait: {e.value} ثانیه صبر...")
-        time.sleep(wait_time)
-        os.execv(sys.executable, ['python'] + sys.argv)
     except Exception as e:
         logging.error(f"❌ خطای غیرمنتظره: {e}")
-
-       
