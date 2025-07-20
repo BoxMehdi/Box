@@ -1,8 +1,12 @@
 services:
   - type: web
-    name: boxoffice-uploaderbot
+    name: BoxOfficeUploaderBot
     env: python
     plan: free
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python bot.py"
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
     autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.13
