@@ -1,14 +1,12 @@
 import asyncio
-import threading
 import os
 from datetime import datetime
 from io import StringIO
-from urllib.parse import quote_plus
-import qrcode
 import csv
 import uuid
+import qrcode
 
-from flask import Flask, send_file
+from flask import send_file
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pymongo import MongoClient
@@ -16,10 +14,10 @@ from dotenv import load_dotenv
 from keep_alive import keep_alive
 import nest_asyncio
 
-# Run keep-alive HTTP server
+# 🔄 اجرای سرور Flask برای نگه‌داشتن ربات آنلاین
 keep_alive()
 
-# Load environment variables
+# 📦 بارگذاری مقادیر از .env
 load_dotenv()
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
@@ -27,13 +25,13 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS").split(",")))
 MONGO_URI = os.getenv("MONGO_URI")
 
-# MongoDB
+# ⚙️ اتصال به دیتابیس MongoDB
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client["boxoffice_db"]
 files_collection = db["files"]
 upload_status = {}
 
-# Channels required for access
+# 📢 کانال‌هایی که عضویت اجباری دارند
 REQUIRED_CHANNELS = [
     "BoxOffice_Animation",
     "BoxOfficeMoviiie",
@@ -41,45 +39,7 @@ REQUIRED_CHANNELS = [
     "BoxOfficeGoftegu"
 ]
 
-# Flask app for keep alive and QR
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "✅ Bot is alive!"
-
-@app.route("/qr/<film_id>")
-def qr(film_id):
-    link = f"https://t.me/BoxOfficeUploaderbot?start={film_id}"
-    img = qrcode.make(link)
-    path = f"qr_{film_id}.png"
-    img.save(path)
-    return send_file(path, mimetype='image/png')
-
-@app.route("/export")
-def export():
-    output = StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["Film Name", "Quality", "Views", "Downloads", "Shares"])
-    for file in files_collection.find():
-        writer.writerow([
-            file.get("name", ""),
-            file.get("quality", ""),
-            file.get("views", 0),
-            file.get("downloads", 0),
-            file.get("shares", 0)
-        ])
-    output.seek(0)
-    return send_file(output, mimetype='text/csv', download_name="stats.csv")
-
-def run_flask():
-    PORT = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=PORT)
-
-# Start Flask in background
-threading.Thread(target=run_flask, daemon=True).start()
-
-# Start bot
+# 🧠 تعریف ربات
 bot = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 async def delete_later(messages, delay=30):
@@ -218,12 +178,12 @@ async def handle_text(client, message):
         )
         del upload_status[user_id]
 
-# Fix event loop issue in some environments
+# ✅ رفع مشکل Nest AsyncIO
 nest_asyncio.apply()
 
+from pyrogram.idle import idle
 async def main():
     await bot.start()
     await idle()
 
-from pyrogram.idle import idle
 asyncio.run(main())
