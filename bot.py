@@ -1,3 +1,5 @@
+from keep_alive import run as keep_alive
+keep_alive()
 import asyncio
 import threading
 import os
