@@ -176,9 +176,10 @@ async def callbacks(client, query: CallbackQuery):
     elif data == "upload_more":
         await query.message.reply("📤 فایل بعدی را ارسال کنید.")
 
-# ========== تست Ping ==========
+# ========== تست /ping ==========
 @app.on_message(filters.command("ping"))
 async def ping(client, message):
+    print("📥 ping received")
     await message.reply("pong 🏓")
 
 # ========== اجرای امن ربات ==========
@@ -203,8 +204,3 @@ if __name__ == "__main__":
     nest_asyncio.apply()
     keep_alive()
     asyncio.run(start_bot())
-    @app.on_message(filters.command("ping"))
-async def ping(client, message):
-    print("📥 ping received")
-    await message.reply("pong 🏓")
-
