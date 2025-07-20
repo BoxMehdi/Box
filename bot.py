@@ -56,7 +56,8 @@ LANGUAGES = {
         "download": "⬇️ دانلود",
         "stats": "📊 آمار",
         "joined_msg": "🎉 خوش آمدی {name} عزیز به جمع باکس‌آفیسی‌ها!\nاز فیلم و سریال‌های ما لذت ببر 🎬🍿",
-        "select_language": "لطفاً زبان مورد نظر خود را انتخاب کنید:"
+        "select_language": "لطفاً زبان مورد نظر خود را انتخاب کنید:",
+        "must_join": "برای ادامه، ابتدا باید عضو کانال‌های زیر شوید 👇"
     },
     "en": {
         "welcome": "Hi there 👋\nWelcome to the Movie & Series Downloader Bot 🎬\nClick the links in the channel captions to use the bot.",
@@ -64,7 +65,8 @@ LANGUAGES = {
         "download": "⬇️ Download",
         "stats": "📊 Stats",
         "joined_msg": "🎉 Welcome {name} to the BoxOffice family!\nEnjoy our movies and series 🎬🍿",
-        "select_language": "Please select your preferred language:"
+        "select_language": "Please select your preferred language:",
+        "must_join": "To continue, please join the following channels 👇"
     }
 }
 
@@ -115,6 +117,10 @@ async def start(client, message: Message):
     args = message.command
     lang = get_user_lang(user_id)
     texts = LANGUAGES[lang]
+
+    if not await is_subscribed(user_id):
+        await message.reply(texts["must_join"], reply_markup=get_subscription_keyboard())
+        return
 
     users_col.update_one({"_id": user_id}, {"$set": {"joined": datetime.now(timezone.utc)}}, upsert=True)
 
