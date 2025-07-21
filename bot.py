@@ -14,8 +14,8 @@ import re
 
 # ========== تنظیمات ==========
 API_ID = 26438691
-API_HASH = "b9a6835fa0eea6e9f8a87a320b3ab1ae"
-BOT_TOKEN = "7643217625:AAFIK6gQ1L0iJNJCllWTY07dG3HNstoiw9Q"
+API_HASH = "b9a6835fa0eea6e9f8a87a320b3ab1ae
+BOT_TOKEN = "7643217625:AAFIK6gQ1L0iJNJCllWTY07dG3HNstoiw9Q"  # ✅ توکن جدید
 ADMINS = [7872708405, 6867380442]
 REQUIRED_CHANNELS = ["@BoxOffice_Irani", "@BoxOfficeMoviiie", "@BoxOffice_Animation", "@BoxOfficeGoftegu"]
 CHANNEL_IDS = [-1002422139602, -1002601782167, -1002573288143]
