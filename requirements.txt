@@ -2,3 +2,4 @@ pyrogram
 pymongo
 certifi
 tgcrypto
+python-dotenv
