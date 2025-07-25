@@ -1,4 +1,5 @@
 import os
+print("MONGO_URI =", repr(os.getenv("MONGO_URI")))
 import asyncio
 import logging
 import uuid
