@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 from pymongo import MongoClient, ReturnDocument
 import certifi
+import os
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
 from pyrogram.types import (
@@ -12,56 +13,47 @@ from pyrogram.types import (
     ChatMemberUpdated
 )
 
+# تنظیمات لاگینگ
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# --- تنظیمات ---
-API_ID = 27145047
-API_HASH = "9e9672f2f920f277daca3d53502e0b34"
-BOT_TOKEN = "7780760854:AAHjrEt0cMC3VFPgXxCGEG40ut_zf3fGLMU"
-BOT_USERNAME = "BoxUploaderBot"
+# ---------------- تنظیمات ربات و دیتابیس ----------------
+API_ID = int(os.getenv("API_ID", "27145047"))
+API_HASH = os.getenv("API_HASH", "9e9672f2f920f277daca3d53502e0b34")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "7780760854:AAHjrEt0cMC3VFPgXxCGEG40ut_zf3fGLMU")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "BoxUploaderBot")
 
-MONGO_URI = "mongodb+srv://BoxOffice:136215@boxofficeuploaderbot.2howsv3.mongodb.net/?retryWrites=true&w=majority&appName=BoxOfficeUploaderBot"
-DB_NAME = "BoxOfficeUploaderBot"
-COLLECTION_NAME = "files"
-UPLOAD_STATE_COLLECTION = "upload_states"
+MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://BoxOffice:136215@boxofficeuploaderbot.2howsv3.mongodb.net/?retryWrites=true&w=majority&appName=BoxOfficeUploaderBot")
+DB_NAME = os.getenv("DB_NAME", "BoxOfficeUploaderBot")
+COLLECTION_NAME = os.getenv("COLLECTION_NAME", "files")
+UPLOAD_STATE_COLLECTION = os.getenv("UPLOAD_STATE_COLLECTION", "upload_states")
 
-ADMIN_IDS = [7872708405, 6867380442]
-REQUIRED_CHANNELS = ["@BoxOffice_Irani", "@BoxOfficeMoviiie", "@BoxOffice_Animation", "@BoxOfficeGoftegu"]
+ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "7872708405,6867380442").split(",")))
+REQUIRED_CHANNELS = os.getenv("REQUIRED_CHANNELS", "@BoxOffice_Irani,@BoxOfficeMoviiie,@BoxOffice_Animation,@BoxOfficeGoftegu").split(",")
 
-WELCOME_IMAGE_URL = "https://i.imgur.com/uZqKsRs.png"
-THANKS_IMAGE_URL = "https://i.imgur.com/fAGPuXo.png"
-
-WELCOME_MESSAGE = (
-    '<b dir="rtl">🎬 به ربات باکس‌آفیس خوش آمدید!</b>\n\n'
-    '<span dir="rtl">لطفاً ابتدا در کانال‌ها و گروه‌های زیر عضو شوید و سپس روی دکمه «✅ عضو شدم» کلیک کنید.</span>'
-)
-
-THANKS_MESSAGE = (
-    '<b dir="rtl">🌟 ممنون که عضو شدید!</b>\n\n'
-    '<span dir="rtl">حالا می‌توانید از ربات استفاده کنید.</span>'
-)
+WELCOME_IMAGE_URL = os.getenv("WELCOME_IMAGE_URL", "https://i.imgur.com/uZqKsRs.png")
+THANKS_IMAGE_URL = os.getenv("THANKS_IMAGE_URL", "https://i.imgur.com/fAGPuXo.png")
 
 DELETE_WARNING = '<span dir="rtl">⏳ فقط ۳۰ ثانیه فرصت دارید فایل‌ها را ذخیره کنید! پس از آن پیام‌ها حذف خواهند شد.</span>'
+DELETE_DELAY_SECONDS = int(os.getenv("DELETE_DELAY_SECONDS", "30"))
+SILENT_MODE_START = int(os.getenv("SILENT_MODE_START", "22"))
+SILENT_MODE_END = int(os.getenv("SILENT_MODE_END", "10"))
 
-DELETE_DELAY_SECONDS = 30
-SILENT_MODE_START = 22  # ساعت 22:00
-SILENT_MODE_END = 10    # ساعت 10:00
-
-# --- اتصال به دیتابیس ---
+# ---------------- اتصال به MongoDB ----------------
 mongo_client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
 db = mongo_client[DB_NAME]
 films_col = db[COLLECTION_NAME]
 upload_states_col = db[UPLOAD_STATE_COLLECTION]
 
-# --- کلاینت ربات ---
+# ---------------- کلاینت Pyrogram ----------------
 app = Client("BoxUploaderBotSession", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# --- توابع کمکی ---
+# ---------------- توابع کمکی ----------------
 def in_silent_mode() -> bool:
+    """بررسی حالت سکوت بات طبق ساعت تنظیم شده"""
     now_hour = datetime.now().hour
     if SILENT_MODE_START > SILENT_MODE_END:
         return now_hour >= SILENT_MODE_START or now_hour < SILENT_MODE_END
@@ -69,16 +61,18 @@ def in_silent_mode() -> bool:
         return SILENT_MODE_START <= now_hour < SILENT_MODE_END
 
 async def is_user_subscribed(user_id: int) -> bool:
+    """بررسی عضویت کاربر در تمام کانال‌های الزامی"""
     for ch in REQUIRED_CHANNELS:
         try:
-            member = await app.get_chat_member(ch, user_id)
+            member = await app.get_chat_member(ch.strip(), user_id)
             if member.status in ("left", "kicked"):
                 return False
         except Exception:
             return False
     return True
 
-def membership_keyboard(film_id: str = None):
+def membership_keyboard(film_id: str = None) -> InlineKeyboardMarkup:
+    """کیبورد دکمه‌های عضویت با دکمه تأیید عضویت"""
     buttons = [[
         InlineKeyboardButton(f"📢 عضویت در {ch}", url=f"https://t.me/{ch.lstrip('@')}")
     ] for ch in REQUIRED_CHANNELS]
@@ -86,7 +80,8 @@ def membership_keyboard(film_id: str = None):
     buttons.append([InlineKeyboardButton("✅ عضو شدم", callback_data=data)])
     return InlineKeyboardMarkup(buttons)
 
-def upload_more_keyboard():
+def upload_more_keyboard() -> InlineKeyboardMarkup:
+    """کیبورد سوال آپلود فایل بیشتر"""
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ بله", callback_data="upload_more_yes"),
@@ -94,11 +89,12 @@ def upload_more_keyboard():
         ]
     ])
 
-def make_stats_text(file):
-    return f"👁 {file.get('views',0)} | 📥 {file.get('downloads',0)} | 🔁 {file.get('shares',0)}"
-
 async def send_welcome_with_membership_buttons(user_id: int, film_id: str = None):
-    text = WELCOME_MESSAGE
+    """ارسال پیام خوش‌آمدگویی به همراه دکمه‌های عضویت"""
+    text = (
+        '<b dir="rtl">🎬 به ربات باکس‌آفیس خوش آمدید!</b>\n\n'
+        '<span dir="rtl">لطفاً ابتدا در کانال‌ها و گروه‌های زیر عضو شوید و سپس روی دکمه «✅ عضو شدم» کلیک کنید.</span>'
+    )
     keyboard = membership_keyboard(film_id)
     try:
         if WELCOME_IMAGE_URL.strip():
@@ -129,7 +125,11 @@ async def send_welcome_with_membership_buttons(user_id: int, film_id: str = None
         )
 
 async def send_thanks_message(user_id: int):
-    text = THANKS_MESSAGE
+    """ارسال پیام تشکر پس از تایید عضویت"""
+    text = (
+        '<b dir="rtl">🌟 ممنون که عضو شدید!</b>\n\n'
+        '<span dir="rtl">حالا می‌توانید از ربات استفاده کنید.</span>'
+    )
     try:
         if THANKS_IMAGE_URL.strip():
             msg = await app.send_photo(
@@ -151,6 +151,7 @@ async def send_thanks_message(user_id: int):
         logger.error(f"[Error] Failed to send thanks message to user {user_id}: {e}")
 
 async def delete_messages_later(messages, delay=DELETE_DELAY_SECONDS):
+    """حذف پیام‌ها پس از تاخیر مشخص"""
     await asyncio.sleep(delay)
     for msg in messages:
         try:
@@ -158,7 +159,11 @@ async def delete_messages_later(messages, delay=DELETE_DELAY_SECONDS):
         except Exception:
             pass
 
-# --- هندلرها ---
+def format_stats(film) -> str:
+    """ساخت متن آمار برای نمایش زیر هر فایل"""
+    return f"👁 {film.get('views', 0)} | 📥 {film.get('downloads', 0)} | 🔁 {film.get('shares', 0)}"
+
+# ---------------- هندلرهای ربات ----------------
 
 @app.on_message(filters.command("ping") & filters.private)
 async def ping_handler(client, message):
@@ -172,10 +177,10 @@ async def start_handler(client, message):
     if len(args) == 2:
         film_id = args[1]
 
-        # بررسی عضویت
+        # بررسی عضویت اجباری
         for ch in REQUIRED_CHANNELS:
             try:
-                member = await client.get_chat_member(ch, user_id)
+                member = await client.get_chat_member(ch.strip(), user_id)
                 if member.status in ("left", "kicked"):
                     raise Exception("Not member")
             except Exception:
@@ -197,23 +202,35 @@ async def start_handler(client, message):
 
         sent_msgs = []
         for file in files:
-            # افزایش بازدید
+            # افزایش شمارنده ویو
             films_col.update_one({"file_id": file["file_id"]}, {"$inc": {"views": 1}})
-            # مجدد گرفتن اطلاعات بعد از افزایش بازدید
-            file = films_col.find_one({"file_id": file["file_id"]})
 
-            cap = (
-                f'<b dir="rtl">{file.get("caption", "")}</b>\n\n'
-                f"{make_stats_text(file)}"
+            film_title = file.get("caption", "فیلم")
+            film_id = file.get("film_id")
+            download_link = f"https://t.me/{BOT_USERNAME}?start={film_id}"
+
+            # کپشن لینک‌دار HTML
+            caption = (
+                f'<a href="{download_link}">دانلود فیلم {film_title}</a>\n\n'
+                f"🎞 کیفیت: {file.get('quality', 'نامشخص')}\n"
+                f"{format_stats(file)}"
             )
+
             btns = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("📥 دانلود", callback_data=f"download_{file['file_id'][:40]}"),
+                    InlineKeyboardButton("📥 دانلود", callback_data=f"download_{file['file_id']}"),
                     InlineKeyboardButton("🔁 اشتراک‌گذاری", switch_inline_query=f"film_{film_id[:30]}"),
-                    InlineKeyboardButton("📊 آمار", callback_data=f"stats_{file['file_id'][:40]}")
+                    InlineKeyboardButton("📊 آمار", callback_data=f"stats_{file['file_id']}")
                 ]
             ])
-            sent = await message.reply_video(file['file_id'], caption=cap, reply_markup=btns, disable_notification=in_silent_mode())
+
+            sent = await message.reply_video(
+                file["file_id"],
+                caption=caption,
+                reply_markup=btns,
+                parse_mode=ParseMode.HTML,
+                disable_notification=in_silent_mode()
+            )
             sent_msgs.append(sent)
 
         warning_msg = await message.reply(DELETE_WARNING, disable_notification=in_silent_mode())
@@ -235,7 +252,7 @@ async def check_membership_callback(client, callback_query):
     not_joined = []
     for ch in REQUIRED_CHANNELS:
         try:
-            member = await app.get_chat_member(ch, user_id)
+            member = await app.get_chat_member(ch.strip(), user_id)
             if member.status in ("left", "kicked"):
                 not_joined.append(ch)
         except Exception:
@@ -254,11 +271,26 @@ async def check_membership_callback(client, callback_query):
                 await callback_query.message.edit_media(
                     media=await app.download_media(THANKS_IMAGE_URL)
                 )
-                await callback_query.message.edit_caption(THANKS_MESSAGE, parse_mode=ParseMode.HTML, reply_markup=None)
+                await callback_query.message.edit_caption(
+                    '<b dir="rtl">🌟 ممنون که عضو شدید!</b>\n\n'
+                    '<span dir="rtl">حالا می‌توانید از ربات استفاده کنید.</span>',
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=None
+                )
             else:
-                await callback_query.message.edit_text(THANKS_MESSAGE, parse_mode=ParseMode.HTML, reply_markup=None)
+                await callback_query.message.edit_text(
+                    '<b dir="rtl">🌟 ممنون که عضو شدید!</b>\n\n'
+                    '<span dir="rtl">حالا می‌توانید از ربات استفاده کنید.</span>',
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=None
+                )
         except Exception:
-            await callback_query.message.edit_text(THANKS_MESSAGE, parse_mode=ParseMode.HTML, reply_markup=None)
+            await callback_query.message.edit_text(
+                '<b dir="rtl">🌟 ممنون که عضو شدید!</b>\n\n'
+                '<span dir="rtl">حالا می‌توانید از ربات استفاده کنید.</span>',
+                parse_mode=ParseMode.HTML,
+                reply_markup=None
+            )
 
 @app.on_callback_query(filters.regex(r"^download_(.+)$"))
 async def download_handler(client, callback_query: CallbackQuery):
@@ -511,15 +543,13 @@ async def welcome_new_member(client: Client, chat_member_update: ChatMemberUpdat
     if chat.username not in [ch.lstrip('@') for ch in REQUIRED_CHANNELS]:
         return
 
-    old_member = chat_member_update.old_chat_member
-    new_member = chat_member_update.new_chat_member
-
-    if old_member is None or new_member is None:
+    # جلوگیری از خطا روی None
+    if not chat_member_update.old_chat_member or not chat_member_update.new_chat_member:
         return
 
-    old_status = old_member.status
-    new_status = new_member.status
-    user = new_member.user
+    old_status = chat_member_update.old_chat_member.status
+    new_status = chat_member_update.new_chat_member.status
+    user = chat_member_update.new_chat_member.user
 
     if old_status in ("left", "kicked") and new_status in ("member", "administrator", "creator"):
         try:
@@ -535,7 +565,7 @@ async def welcome_new_member(client: Client, chat_member_update: ChatMemberUpdat
         except Exception as e:
             logger.error(f"خطا در ارسال پیام خوشامدگویی به کاربر {user.id}: {e}")
 
-
+# ---------------- اجرای ربات ----------------
 if __name__ == "__main__":
     logger.info("🤖 ربات BoxOfficeUploaderBot در حال اجراست...")
     app.run()
