@@ -1,242 +1,118 @@
+import os
+import ssl
+import certifi
 import asyncio
 import logging
-import os
-from datetime import datetime, timedelta
-from pyrogram import Client, filters
-from pyrogram.types import (
-    Message,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-)
 from pymongo import MongoClient
-import certifi
+from pymongo.errors import ServerSelectionTimeoutError
+from pyrogram import Client, filters
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
-# -------- تنظیمات اصلی --------
+# تنظیمات اولیه
 API_ID = 26438691
 API_HASH = "b9a6835fa0eea6e9f8a87a320b3ab1ae"
 BOT_TOKEN = "8172767693:AAHdIxn6ueG6HaWFtv4WDH3MjLOmZQPNZQM"
-
 ADMINS = [7872708405, 6867380442]
+REQUIRED_CHANNELS = ["@BoxOffice_Irani", "@BoxOfficeMoviiie", "@BoxOffice_Animation", "@BoxOfficeGoftegu"]
 
-REQUIRED_CHANNELS = [
-    "@BoxOffice_Irani",
-    "@BoxOfficeMoviiie",
-    "@BoxOffice_Animation",
-    "@BoxOfficeGoftegu",
-]
+# مقدار MONGO_URI رو جایگزین کن با کانکشن استرینگ MongoDB Atlas خودت
+MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://username:password@cluster.mongodb.net/mydb?retryWrites=true&w=majority")
 
-MONGO_URI = "mongodb+srv://BoxOfficeRobot:WIqhkOQ974s6xkpe@boxofficerobot.9jlszia.mongodb.net/mydatabase?retryWrites=true&w=majority&tls=true"
+# لاگ سطح INFO
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
 
-# -------- راه‌اندازی لاگینگ --------
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    level=logging.INFO,
-)
-logger = logging.getLogger(__name__)
+print("OpenSSL version:", ssl.OPENSSL_VERSION)
 
-# -------- اتصال به MongoDB --------
+# تابع ایجاد اتصال MongoDB با Retry
+def connect_mongo(uri, max_retries=5):
+    for attempt in range(1, max_retries+1):
+        try:
+            client = MongoClient(
+                uri,
+                tls=True,
+                tlsCAFile=certifi.where(),
+                serverSelectionTimeoutMS=30000,
+                connectTimeoutMS=30000,
+            )
+            # این خط برای اطمینان از اتصال به سرور است
+            client.server_info()
+            logging.info("✅ اتصال به MongoDB برقرار شد.")
+            return client
+        except ServerSelectionTimeoutError as e:
+            logging.error(f"❌ خطا در اتصال به MongoDB (تلاش {attempt} از {max_retries}): {e}")
+            if attempt == max_retries:
+                logging.error("اتصال به دیتابیس برقرار نشد، برنامه متوقف شد.")
+                raise
+            else:
+                logging.info("در حال تلاش مجدد اتصال به MongoDB...")
+                asyncio.sleep(5)
+
+# ساخت کلاینت MongoDB
 try:
-    mongo_client = MongoClient(
-        MONGO_URI,
-        tlsCAFile=certifi.where(),
-        serverSelectionTimeoutMS=10000,
-        connectTimeoutMS=10000,
-        socketTimeoutMS=20000,
-    )
-    mongo_client.server_info()  # تست اتصال
-    logger.info("✅ اتصال به MongoDB موفق بود.")
-except Exception as e:
-    logger.error(f"❌ خطا در اتصال به MongoDB: {e}")
-    raise SystemExit("اتصال به دیتابیس برقرار نشد، برنامه متوقف شد.")
+    mongo_client = connect_mongo(MONGO_URI)
+except Exception:
+    # اگر اتصال نشد، برنامه متوقف می‌شود
+    exit(1)
 
-db = mongo_client['BoxOfficeDB']
-upload_states_col = db['upload_states']
-files_col = db['files']
+db = mongo_client.get_database("boxoffice")
+upload_states_col = db.get_collection("upload_states")
+files_col = db.get_collection("files")
 
-# -------- راه‌اندازی ربات --------
-bot = Client(
-    "BoxOfficeUploaderBot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN,
-)
+app = Client("BoxOfficeUploaderBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# -------- فانکشن بررسی عضویت در کانال‌ها --------
-async def check_subscriptions(user_id: int) -> bool:
+# چک کردن عضویت در کانال‌ها
+async def check_subscriptions(user_id):
     for channel in REQUIRED_CHANNELS:
         try:
-            member = await bot.get_chat_member(channel, user_id)
-            if member.status not in ("member", "administrator", "creator"):
+            member = await app.get_chat_member(channel, user_id)
+            if member.status in ["left", "kicked"]:
                 return False
         except Exception as e:
-            logger.warning(f"خطا در بررسی عضویت کانال {channel}: {e}")
+            logging.warning(f"خطا در بررسی عضویت کاربر {user_id} در {channel}: {e}")
             return False
     return True
 
-# -------- شروع آپلود (فقط ادمین) --------
-@bot.on_message(filters.private & filters.user(ADMINS) & filters.command("upload"))
-async def upload_start(client: Client, message: Message):
-    # ریست حالت آپلود
-    upload_states_col.update_one(
-        {"admin_id": message.from_user.id},
-        {"$set": {"step": "waiting_title", "files": [], "cover_sent": False}},
-        upsert=True,
-    )
-    await message.reply_text(
-        "🎬 لطفا نام فیلم یا سریال را ارسال کنید:",
-    )
-
-# -------- دریافت عنوان --------
-@bot.on_message(filters.private & filters.user(ADMINS))
-async def upload_handler(client: Client, message: Message):
-    state = upload_states_col.find_one({"admin_id": message.from_user.id})
-    if not state:
-        return
-
-    step = state.get("step")
-
-    if step == "waiting_title":
-        title = message.text.strip()
-        upload_states_col.update_one(
-            {"admin_id": message.from_user.id},
-            {"$set": {"title": title, "step": "waiting_file"}},
-        )
-        await message.reply_text(
-            f"عنوان فیلم '{title}' ثبت شد.\nحالا لطفا فایل ویدیویی یا هر فایل مرتبط را ارسال کنید.\n(برای پایان آپلود، /done را بفرستید.)"
-        )
-        return
-
-    if step == "waiting_file":
-        if message.text and message.text == "/done":
-            # ذخیره نهایی
-            data = upload_states_col.find_one({"admin_id": message.from_user.id})
-            title = data.get("title")
-            files = data.get("files", [])
-            if not files:
-                await message.reply_text("❌ هیچ فایلی آپلود نکردید!")
-                return
-            # ذخیره فایل‌ها در DB
-            film_id = str(title).replace(" ", "_").lower()
-            for f in files:
-                files_col.insert_one({
-                    "film_id": film_id,
-                    "title": title,
-                    "file_id": f["file_id"],
-                    "caption": f.get("caption", ""),
-                    "quality": f.get("quality", ""),
-                    "upload_date": datetime.utcnow(),
-                })
-            upload_states_col.delete_one({"admin_id": message.from_user.id})
-            await message.reply_text(f"✅ فیلم '{title}' با {len(files)} فایل با موفقیت ذخیره شد.\nلینک اختصاصی:\n/start_{film_id}")
-            return
-        # انتظار فایل
-        if message.video or message.document or message.audio or message.animation:
-            file_id = None
-            caption = message.caption or ""
-            quality = ""
-
-            # کیفیت را از متن کپشن استخراج کن اگر هست، مثلا "720p"
-            if caption:
-                import re
-                match = re.search(r"\b(\d{3,4}p)\b", caption)
-                if match:
-                    quality = match.group(1)
-
-            if message.video:
-                file_id = message.video.file_id
-            elif message.document:
-                file_id = message.document.file_id
-            elif message.audio:
-                file_id = message.audio.file_id
-            elif message.animation:
-                file_id = message.animation.file_id
-
-            # اضافه کردن به فایل‌ها
-            upload_states_col.update_one(
-                {"admin_id": message.from_user.id},
-                {"$push": {"files": {"file_id": file_id, "caption": caption, "quality": quality}}},
-            )
-            await message.reply_text(f"✅ فایل با کیفیت '{quality or 'نامعلوم'}' ذخیره شد. فایل بعدی را ارسال کنید یا /done بفرستید.")
-            return
-
-# -------- دریافت دستور /start --------
-@bot.on_message(filters.private & filters.command("start"))
+# دستور استارت ساده
+@app.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
-    args = message.text.split(maxsplit=1)
-    if len(args) == 1:
-        # بدون آرگومان، خوش آمدگویی و دکمه عضویت
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("🔰 عضویت در کانال‌ها", url=chan) for chan in REQUIRED_CHANNELS]]
-        )
-        await message.reply_photo(
-            "https://i.imgur.com/uZqKsRs.png",
-            caption="🎉 خوش آمدید به ربات BoxOfficeUploaderBot!\nبرای دریافت فایل‌ها ابتدا باید عضو کانال‌های زیر شوید:",
-            reply_markup=keyboard,
-        )
-        return
+    user_id = message.from_user.id
+    text = "👋 سلام!\nبرای دسترسی به فیلم‌ها ابتدا باید عضو کانال‌های ما باشید."
+    buttons = [
+        [InlineKeyboardButton("عضویت در @BoxOffice_Irani", url="https://t.me/BoxOffice_Irani")],
+        [InlineKeyboardButton("عضویت در @BoxOfficeMoviiie", url="https://t.me/BoxOfficeMoviiie")],
+        [InlineKeyboardButton("عضویت در @BoxOffice_Animation", url="https://t.me/BoxOffice_Animation")],
+        [InlineKeyboardButton("عضویت در @BoxOfficeGoftegu", url="https://t.me/BoxOfficeGoftegu")],
+        [InlineKeyboardButton("✅ من عضو شدم", callback_data="check_subs")],
+    ]
+    await message.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-    film_arg = args[1].strip()
-    # ممکنه فرمت deep link: start film_id یا start_filmid باشه
-    if film_arg.startswith("_"):
-        film_id = film_arg[1:]
+@app.on_callback_query(filters.regex("^check_subs$"))
+async def check_subs_callback(client: Client, callback_query):
+    user_id = callback_query.from_user.id
+    if await check_subscriptions(user_id):
+        await callback_query.answer("🎉 تبریک! شما عضو همه کانال‌ها هستید.", show_alert=True)
+        await callback_query.message.edit("✅ عضویت شما تایید شد. اکنون می‌توانید فایل‌ها را دریافت کنید.")
     else:
-        film_id = film_arg
+        await callback_query.answer("❌ شما هنوز عضو همه کانال‌ها نیستید!", show_alert=True)
 
-    # بررسی عضویت
-    is_sub = await check_subscriptions(message.from_user.id)
-    if not is_sub:
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("✅ من عضو شدم", callback_data="check_join")]]
-        )
-        await message.reply_text(
-            "⚠️ لطفا ابتدا عضو همه کانال‌های زیر شوید و سپس روی دکمه زیر کلیک کنید:",
-            reply_markup=keyboard,
-        )
-        return
+# آپلود فایل فقط برای ادمین‌ها (نمونه)
+@app.on_message(filters.document & filters.user(ADMINS))
+async def upload_handler(client: Client, message: Message):
+    admin_id = message.from_user.id
+    # ذخیره فایل در MongoDB (فقط مثال، معمولاً فایل‌ها را در تلگرام نگهداری می‌کنیم)
+    file_info = {
+        "file_id": message.document.file_id,
+        "file_name": message.document.file_name,
+        "admin_id": admin_id,
+    }
+    files_col.insert_one(file_info)
+    await message.reply("🎉 فایل با موفقیت ذخیره شد و آماده استفاده است.")
 
-    # ارسال فایل‌های فیلم
-    film_files = list(files_col.find({"film_id": film_id}))
-    if not film_files:
-        await message.reply_text("❌ فایلی برای این شناسه پیدا نشد.")
-        return
+# خطاهای کلی
+@app.on_message(filters.private)
+async def unknown_message(client: Client, message: Message):
+    await message.reply("❌ دستور شناخته نشده! از /start استفاده کنید.")
 
-    await message.reply_photo(
-        "https://i.imgur.com/fAGPuXo.png",
-        caption=f"🎬 فیلم {film_files[0]['title']} آماده است.\nلطفا فایل‌ها را دریافت کنید.",
-    )
-
-    for f in film_files:
-        await client.send_cached_media(
-            message.chat.id,
-            f["file_id"],
-            caption=f"🎞 کیفیت: {f.get('quality', 'نامشخص')}\n{f.get('caption','')}",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("🎬 دانلود", url=f"https://t.me/{client.username}?start={f['film_id']}")]]
-            ),
-            disable_notification=True,
-        )
-        # حذف بعد 30 ثانیه
-        await asyncio.sleep(30)
-        await client.delete_messages(message.chat.id, message.message_id)
-
-    await message.reply_text("⏳ توجه: فایل‌ها پس از ۳۰ ثانیه حذف خواهند شد. لطفا ذخیره کنید!")
-
-# -------- دکمه بررسی عضویت --------
-@bot.on_callback_query(filters.regex("check_join"))
-async def check_join_callback(client, callback_query):
-    is_sub = await check_subscriptions(callback_query.from_user.id)
-    if is_sub:
-        await callback_query.answer("🎉 شما عضو همه کانال‌ها هستید!", show_alert=True)
-        await callback_query.message.edit(
-            "✅ تبریک! عضویت شما تایید شد.\nاکنون می‌توانید از ربات استفاده کنید."
-        )
-    else:
-        await callback_query.answer("❌ هنوز عضو همه کانال‌ها نیستید.", show_alert=True)
-
-# -------- حذف خودکار پیام‌ها پس از ارسال فایل --------
-# (نمونه برای فایل‌های ارسال شده در start_handler، به صورت sleep و حذف پیام بعد از ۳۰ ثانیه)
-
-# -------- اجرای ربات --------
 if __name__ == "__main__":
-    logger.info("🤖 ربات BoxOfficeUploaderBot در حال اجراست...")
-    bot.run()
+    print("🤖 ربات BoxOfficeUploaderBot در حال اجراست...")
+    app.run()
