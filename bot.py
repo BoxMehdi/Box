@@ -1,75 +1,52 @@
 import os
-import time
+import asyncio
 import logging
-import certifi
-from pymongo import MongoClient
-from pymongo.errors import ServerSelectionTimeoutError
+from pymongo import MongoClient, errors
 from dotenv import load_dotenv
+from pyrogram import Client
 
 # بارگذاری متغیرهای محیطی از فایل .env
 load_dotenv()
 
-# دریافت متغیرها
+# گرفتن متغیرها از محیط
 MONGO_URI = os.getenv("MONGO_URI")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_ID = int(os.getenv("API_ID", "0"))
 API_HASH = os.getenv("API_HASH")
 ADMINS = list(map(int, os.getenv("ADMINS", "").split(","))) if os.getenv("ADMINS") else []
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(message)s',
-)
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s | %(levelname)s | %(message)s')
 
-def connect_mongo(uri, max_retries=5):
-    for attempt in range(1, max_retries + 1):
+# تابع اتصال به MongoDB با retry و مدیریت خطا
+def connect_mongo(uri, retries=5, delay=5):
+    for attempt in range(1, retries + 1):
         try:
-            client = MongoClient(
-                uri,
-                tls=True,
-                tlsCAFile=certifi.where(),
-                serverSelectionTimeoutMS=30000,
-                connectTimeoutMS=30000,
-            )
-            client.server_info()  # تست اتصال
-            logging.info("✅ اتصال به MongoDB برقرار شد.")
+            client = MongoClient(uri, serverSelectionTimeoutMS=10000)
+            # تست اتصال
+            client.admin.command('ping')
+            logging.info("✅ اتصال موفق به MongoDB برقرار شد.")
             return client
-        except ServerSelectionTimeoutError as e:
-            logging.error(f"❌ خطا در اتصال به MongoDB (تلاش {attempt} از {max_retries}): {e}")
-            if attempt == max_retries:
+        except errors.ServerSelectionTimeoutError as e:
+            logging.error(f"❌ خطا در اتصال به MongoDB (تلاش {attempt} از {retries}): {e}")
+            if attempt == retries:
                 logging.error("اتصال به دیتابیس برقرار نشد، برنامه متوقف شد.")
-                raise
+                raise e
             else:
-                logging.info("در حال تلاش مجدد اتصال به MongoDB...")
-                time.sleep(5)  # حتما از time.sleep استفاده کن
+                logging.info(f"در حال تلاش مجدد اتصال به MongoDB بعد از {delay} ثانیه...")
+                asyncio.run(asyncio.sleep(delay))
 
-if not MONGO_URI:
-    logging.error("❌ متغیر محیطی MONGO_URI تعریف نشده است. لطفا فایل .env را بررسی کنید.")
-    exit(1)
-
+# اتصال به MongoDB
 try:
     mongo_client = connect_mongo(MONGO_URI)
-except Exception as e:
-    logging.error(f"اتصال به MongoDB با خطا مواجه شد: {e}")
-    exit(1)
+except Exception:
+    exit(1)  # اگر نتوانست اتصال بزند برنامه را متوقف کن
 
-# حالا mongo_client را برای دیتابیس استفاده کن
-db = mongo_client['BoxOfficeDB']  # نام دیتابیس خودت
+# ساخت کلاینت تلگرام
+app = Client("my_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# بقیه کد ربات تلگرام با Pyrogram اینجا ادامه پیدا میکنه...
-from pyrogram import Client, filters
-
-app = Client(
-    "BoxOfficeUploaderBot",
-    bot_token=BOT_TOKEN,
-    api_id=API_ID,
-    api_hash=API_HASH,
-)
-
-# مثال ساده - تست ربات
-@app.on_message(filters.command("start") & filters.private)
-async def start(client, message):
-    await message.reply_text("ربات فعال است!")
+# اینجا بقیه‌ی کد رباتت رو اضافه کن
 
 if __name__ == "__main__":
+    logging.info("🤖 ربات شروع به کار کرد.")
     app.run()
