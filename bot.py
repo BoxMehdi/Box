@@ -171,7 +171,6 @@ async def check_membership_callback(client, callback_query):
     film_id = None
     if data.startswith("check_") and data != "check_membership":
         film_id = data.split("_", 1)[1]
-
     not_joined = []
     for ch in REQUIRED_CHANNELS:
         try:
@@ -180,48 +179,33 @@ async def check_membership_callback(client, callback_query):
                 not_joined.append(ch)
         except Exception:
             not_joined.append(ch)
-
     if not_joined:
-        text = "❌ هنوز در کانال‌ها و گروه‌های زیر عضو نشده‌اید:\n"
-        text += "\n".join(not_joined)
-        text += "\n\nلطفاً ابتدا عضو شوید و سپس دوباره روی «✅ عضو شدم» کلیک کنید."
+        text = "❌ هنوز در کانال‌ها و گروه‌های زیر عضو نشده‌اید:\n" + "\n".join(not_joined) + "\n\nلطفاً ابتدا عضو شوید و سپس دوباره روی «✅ عضو شدم» کلیک کنید."
         await callback_query.answer(text, show_alert=True)
         await send_welcome_with_membership_buttons(user_id, film_id)
     else:
         await callback_query.answer("🎉 تبریک! شما عضو همه کانال‌ها و گروه‌ها هستید.", show_alert=True)
         try:
-            # حذف پیام قبلی
-            await callback_query.message.delete()
-
-            # ارسال پیام تشکر جذاب
-            caption_text = (
-                "<b>🌟 ممنون که عضو شدی!</b>\n\n"
-                "🎉 از انتخابت سپاسگزاریم.\n"
-                "✨ به جمع ما خوش آمدی! امیدواریم از ربات نهایت استفاده رو ببری. ❤️\n\n"
-                "<i>برای دریافت آخرین فیلم‌ها و سریال‌ها ما رو دنبال کن!</i>"
+            if THANKS_IMAGE_URL.strip():
+                # اینجا باید متن تشکر رو تعریف کنیم که نبود ارور نده
+                thanks_text = (
+                    '<b dir="rtl">🌟 ممنون که عضو شدید!</b>\n\n'
+                    '<span dir="rtl">حالا می‌توانید از ربات استفاده کنید.</span>'
+                )
+                await callback_query.message.edit_media(media=await app.download_media(THANKS_IMAGE_URL))
+                await callback_query.message.edit_caption(thanks_text, parse_mode=ParseMode.HTML, reply_markup=None)
+            else:
+                thanks_text = (
+                    '<b dir="rtl">🌟 ممنون که عضو شدید!</b>\n\n'
+                    '<span dir="rtl">حالا می‌توانید از ربات استفاده کنید.</span>'
+                )
+                await callback_query.message.edit_text(thanks_text, parse_mode=ParseMode.HTML, reply_markup=None)
+        except Exception:
+            thanks_text = (
+                '<b dir="rtl">🌟 ممنون که عضو شدید!</b>\n\n'
+                '<span dir="rtl">حالا می‌توانید از ربات استفاده کنید.</span>'
             )
-
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("📺 کانال ما", url="https://t.me/BoxOfficeMoviiie")],
-                [InlineKeyboardButton("🔄 بازگشت به ربات", callback_data="start")]
-            ])
-
-            await app.send_photo(
-                chat_id=user_id,
-                photo=THANKS_IMAGE_URL,
-                caption=caption_text,
-                parse_mode=ParseMode.HTML,
-                reply_markup=keyboard,
-                disable_notification=in_silent_mode()
-            )
-        except Exception as e:
-            # اگر خطا رخ داد، پیام متنی جایگزین بده
-            await callback_query.message.edit_text(
-                "<b>🌟 ممنون که عضو شدی!</b>\n\n"
-                "🎉 از انتخابت سپاسگزاریم.\n"
-                "✨ به جمع ما خوش آمدی! امیدواریم از ربات نهایت استفاده رو ببری. ❤️",
-                parse_mode=ParseMode.HTML
-            )
+            await callback_query.message.edit_text(thanks_text, parse_mode=ParseMode.HTML, reply_markup=None)
 
 @app.on_callback_query(filters.regex(r"^download_(.+)$"))
 async def download_handler(client, callback_query: CallbackQuery):
@@ -445,6 +429,21 @@ async def welcome_new_member(client: Client, chat_member_update: ChatMemberUpdat
         except Exception as e:
             logger.error(f"خطا در ارسال پیام خوشامدگویی به کاربر {user.id}: {e}")
 
+# اضافه کردن دستور مدیریت آمار
+@app.on_message(filters.command("stats") & filters.private & filters.user(ADMIN_IDS))
+async def stats_handler_admin(client, message):
+    total_files = films_col.count_documents({})
+    unique_films = len(films_col.distinct("film_id"))
+    total_upload_sessions = upload_states_col.count_documents({})
+    await message.reply(
+        f"📊 آمار ربات:\n\n"
+        f"🎬 تعداد کل فایل‌ها: {total_files}\n"
+        f"🎞 تعداد فیلم‌های یکتا: {unique_films}\n"
+        f"📂 تعداد آپلودهای فعال: {total_upload_sessions}\n"
+        f"👥 تعداد کاربران فعال (عضو کانال‌ها بررسی نمی‌کند): نیاز به افزودن لاگ بیشتر"
+    )
+
 if __name__ == "__main__":
     logger.info("🤖 ربات BoxOfficeUploaderBot در حال اجراست...")
     app.run()
+
