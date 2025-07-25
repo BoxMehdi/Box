@@ -1,6 +1,4 @@
-pyrogram==2.0.106
-tgcrypto==1.2.5
-pymongo[srv]==4.6.3
-flask==3.0.3
-nest_asyncio==1.6.0
-qrcode==7.4.2
+pyrogram
+pymongo
+certifi
+tgcrypto
