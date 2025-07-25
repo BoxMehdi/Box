@@ -2,4 +2,3 @@ pyrogram
 pymongo
 certifi
 tgcrypto
-Python 3.10
