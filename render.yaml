@@ -1,12 +1,40 @@
+# render.yaml for BoxOfficeUploaderBot Telegram Bot
+
 services:
-  - type: web
+  - type: worker
     name: BoxOfficeUploaderBot
     env: python
-    plan: free
     region: frankfurt
+    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
-    autoDeploy: true
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.10.13
+      - key: API_ID
+        value: "27145047"
+      - key: API_HASH
+        value: "9e9672f2f920f277daca3d53502e0b34"
+      - key: BOT_TOKEN
+        value: "7780760854:AAHjrEt0cMC3VFPgXxCGEG40ut_zf3fGLMU"
+      - key: MONGO_URI
+        value: "mongodb+srv://BoxOfficeRobot:136215@boxofficerobot.9jlszia.mongodb.net/?retryWrites=true&w=majority&appName=BoxOfficeRobot"
+      - key: DB_NAME
+        value: "BoxOfficeUploaderBot"
+      - key: COLLECTION_NAME
+        value: "files"
+      - key: UPLOAD_STATE_COLLECTION
+        value: "upload_states"
+      - key: ADMIN_IDS
+        value: "7872708405,6867380442"
+      - key: REQUIRED_CHANNELS
+        value: "@BoxOffice_Irani,@BoxOfficeMoviiie,@BoxOffice_Animation,@BoxOfficeGoftegu"
+      - key: WELCOME_IMAGE_URL
+        value: "https://i.imgur.com/uZqKsRs.png"
+      - key: THANKS_IMAGE_URL
+        value: "https://i.imgur.com/fAGPuXo.png"
+      - key: DELETE_DELAY_SECONDS
+        value: "30"
+      - key: SILENT_MODE_START
+        value: "22"
+      - key: SILENT_MODE_END
+        value: "10"
+    autoDeploy: true
