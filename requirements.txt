@@ -1,6 +1,5 @@
-pyrogram
-tgcrypto
-python-dotenv
+pyrogram==2.0.106
 pymongo==4.13.2
-dnspython==2.7.0
+python-dotenv==1.1.1
+tgcrypto==1.2.5
 certifi==2025.7.14
