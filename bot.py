@@ -12,7 +12,6 @@ from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 import re
 
-# بارگذاری متغیرهای محیطی
 load_dotenv()
 
 API_ID = int(os.getenv("API_ID"))
@@ -22,26 +21,26 @@ MONGO_URI = os.getenv("MONGO_URI")
 DB_NAME = os.getenv("DB_NAME", "BoxOfficeUploaderBot")
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "files")
 UPLOAD_STATE_COLLECTION = os.getenv("UPLOAD_STATE_COLLECTION", "upload_states")
+WELCOME_MESSAGES_COLLECTION = "welcome_messages"  # کالکشن جدید
 ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "").split(",")))
 REQUIRED_CHANNELS = os.getenv("REQUIRED_CHANNELS", "").split(",")
-WELCOME_IMAGE_URL = os.getenv("WELCOME_IMAGE_URL")  # عکس دعوت به عضویت
-THANKS_IMAGE_URL = os.getenv("THANKS_IMAGE_URL")    # عکس تایید عضویت
+WELCOME_IMAGE_URL = os.getenv("WELCOME_IMAGE_URL")
+THANKS_IMAGE_URL = os.getenv("THANKS_IMAGE_URL")
 DELETE_DELAY_SECONDS = int(os.getenv("DELETE_DELAY_SECONDS", "30"))
 SILENT_MODE_START = int(os.getenv("SILENT_MODE_START", "22"))
 SILENT_MODE_END = int(os.getenv("SILENT_MODE_END", "10"))
 
-# تنظیمات لاگ
 logging.basicConfig(
     format='%(asctime)s | %(levelname)s | %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# اتصال به MongoDB
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client[DB_NAME]
 files_col = db[COLLECTION_NAME]
 upload_states_col = db[UPLOAD_STATE_COLLECTION]
+welcome_messages_col = db[WELCOME_MESSAGES_COLLECTION]  # کالکشن ذخیره پیام‌های خوش‌آمدگویی
 
 app = Client("BoxOfficeUploaderBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
@@ -83,28 +82,39 @@ def url_to_buttons(text):
         buttons.append([InlineKeyboardButton("📥 دانلود", url=url)])
     return InlineKeyboardMarkup(buttons) if buttons else None
 
-async def delete_previous_bot_messages(chat_id):
-    try:
-        async for msg in app.get_chat_history(chat_id, limit=20):
-            if msg.from_user and msg.from_user.is_bot:
-                await msg.delete()
-    except Exception as e:
-        logger.warning(f"Failed to delete old messages: {e}")
+# حذف پیام‌های خوش‌آمدگویی قبلی با استفاده از دیتابیس
+async def delete_welcome_messages(chat_id):
+    messages = list(welcome_messages_col.find({"chat_id": chat_id}))
+    for doc in messages:
+        msg_id = doc.get("message_id")
+        try:
+            await app.delete_messages(chat_id, msg_id)
+        except Exception:
+            pass
+        # حذف رکورد از دیتابیس
+        welcome_messages_col.delete_one({"_id": doc["_id"]})
+
+# ذخیره آیدی پیام خوش‌آمدگویی در دیتابیس
+async def save_welcome_message(chat_id, message):
+    welcome_messages_col.insert_one({
+        "chat_id": chat_id,
+        "message_id": message.message_id,
+        "date": datetime.utcnow()
+    })
+    # اختیاری: برای پاکسازی خودکار پیام‌های قدیمی‌تر می‌تونی اینجا شرط بزاری
 
 @app.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message):
     logger.info(f"/start handler triggered by user {message.from_user.id}")
 
-    # حذف دقیق پیام‌های قبلی ربات تا ۲۰ پیام اخیر
-    await delete_previous_bot_messages(message.chat.id)
+    await delete_welcome_messages(message.chat.id)
 
     args = message.text.split(maxsplit=1)
     user_id = message.from_user.id
 
     if len(args) == 1:
-        # فقط یک پیام خوش‌آمدگویی با عکس و دکمه‌ها بفرست
         if WELCOME_IMAGE_URL:
-            await app.send_photo(
+            sent_msg = await app.send_photo(
                 message.chat.id,
                 WELCOME_IMAGE_URL,
                 caption="👋 سلام!\nبرای دریافت فیلم‌ها ابتدا باید عضو کانال‌های زیر شوید.",
@@ -112,19 +122,17 @@ async def start_handler(client, message):
                 disable_notification=is_silent_mode()
             )
         else:
-            await send_message_silent(
+            sent_msg = await send_message_silent(
                 message.chat.id,
                 "👋 سلام!\nبرای دریافت فیلم‌ها ابتدا باید عضو کانال‌های زیر شوید.",
                 reply_markup=get_join_channels_keyboard()
             )
+        await save_welcome_message(message.chat.id, sent_msg)
         return
 
-    film_id = args[1]
-
     if not await check_user_membership(user_id):
-        # اگر عضو نیست، دوباره همون پیام خوش‌آمدگویی با عکس و دکمه بفرست
         if WELCOME_IMAGE_URL:
-            await app.send_photo(
+            sent_msg = await app.send_photo(
                 message.chat.id,
                 WELCOME_IMAGE_URL,
                 caption="⚠️ شما عضو همه کانال‌ها نیستید! لطفا ابتدا عضو شوید.",
@@ -132,23 +140,22 @@ async def start_handler(client, message):
                 disable_notification=is_silent_mode()
             )
         else:
-            await send_message_silent(
+            sent_msg = await send_message_silent(
                 message.chat.id,
                 "⚠️ شما عضو همه کانال‌ها نیستید! لطفا ابتدا عضو شوید.",
                 reply_markup=get_join_channels_keyboard()
             )
+        await save_welcome_message(message.chat.id, sent_msg)
         return
 
-    film_files = list(files_col.find({"film_id": film_id}))
+    film_files = list(files_col.find({"film_id": args[1]}))
     if not film_files:
         await send_message_silent(message.chat.id, "❌ فیلم یا سریالی با این شناسه یافت نشد.")
         return
 
-    # ارسال عکس خوش‌آمدگویی (می‌تونی اینجا عکس دوم هم بذاری اگر خواستی)
     if WELCOME_IMAGE_URL:
         await app.send_photo(message.chat.id, WELCOME_IMAGE_URL, disable_notification=is_silent_mode())
 
-    # ارسال فایل‌ها با کپشن و دکمه دانلود
     for file_doc in film_files:
         file_type = file_doc.get("file_type", "video")
         caption = file_doc.get("caption", "")
