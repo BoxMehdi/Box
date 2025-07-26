@@ -14,20 +14,23 @@ from pyrogram.types import (
 )
 from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
 
+# Logging setup
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s"
 )
 logger = logging.getLogger(__name__)
 
+# Config variables
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME")
 
-MONGO_URI = os.getenv("MONGO_URI")
+MONGO_URI = os.getenv("MONGO_URI").strip()
 DB_NAME = os.getenv("DB_NAME")
 COLLECTION_NAME = os.getenv("COLLECTION_NAME")
 UPLOAD_STATE_COLLECTION = os.getenv("UPLOAD_STATE_COLLECTION")
@@ -35,20 +38,28 @@ UPLOAD_STATE_COLLECTION = os.getenv("UPLOAD_STATE_COLLECTION")
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS").split(",")]
 REQUIRED_CHANNELS = [x.strip() for x in os.getenv("REQUIRED_CHANNELS").split(",")]
 
-WELCOME_IMAGE_URL = os.getenv("WELCOME_IMAGE_URL")
-THANKS_IMAGE_URL = os.getenv("THANKS_IMAGE_URL")
+WELCOME_IMAGE_URL = os.getenv("WELCOME_IMAGE_URL", "").strip()
+THANKS_IMAGE_URL = os.getenv("THANKS_IMAGE_URL", "").strip()
 
 SILENT_MODE_START = int(os.getenv("SILENT_MODE_START"))
 SILENT_MODE_END = int(os.getenv("SILENT_MODE_END"))
 DELETE_DELAY_SECONDS = int(os.getenv("DELETE_DELAY_SECONDS"))
 
-mongo_client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
+# MongoDB client with TLS config
+mongo_client = MongoClient(
+    MONGO_URI,
+    tls=True,
+    tlsCAFile=certifi.where(),
+    serverSelectionTimeoutMS=10000
+)
 db = mongo_client[DB_NAME]
 films_col = db[COLLECTION_NAME]
 upload_states_col = db[UPLOAD_STATE_COLLECTION]
 
+# Initialize Pyrogram client
 app = Client("BoxUploaderBotSession", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
+# Helper: check silent mode time
 def in_silent_mode() -> bool:
     now_hour = datetime.now().hour
     if SILENT_MODE_START > SILENT_MODE_END:
@@ -56,6 +67,7 @@ def in_silent_mode() -> bool:
     else:
         return SILENT_MODE_START <= now_hour < SILENT_MODE_END
 
+# Helper: check user subscription to required channels
 async def is_user_subscribed(user_id: int) -> bool:
     for ch in REQUIRED_CHANNELS:
         try:
@@ -66,19 +78,25 @@ async def is_user_subscribed(user_id: int) -> bool:
             return False
     return True
 
+# Create inline keyboard for membership buttons
 def membership_keyboard(film_id: str = None):
     buttons = [[InlineKeyboardButton(f"📢 عضویت در {ch}", url=f"https://t.me/{ch.lstrip('@')}")] for ch in REQUIRED_CHANNELS]
     data = "check_membership" if film_id is None else f"check_{film_id}"
     buttons.append([InlineKeyboardButton("✅ عضو شدم", callback_data=data)])
     return InlineKeyboardMarkup(buttons)
 
+# Keyboard for upload more files prompt
 def upload_more_keyboard():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("✅ بله", callback_data="upload_more_yes"),
-                                  InlineKeyboardButton("❌ خیر", callback_data="upload_more_no")]])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ بله", callback_data="upload_more_yes"),
+         InlineKeyboardButton("❌ خیر", callback_data="upload_more_no")]
+    ])
 
+# Format stats text for files
 def make_stats_text(file):
     return f"👁 {file.get('views',0)} | 📥 {file.get('downloads',0)} | 🔁 {file.get('shares',0)}"
 
+# Send welcome message with membership buttons
 async def send_welcome_with_membership_buttons(user_id: int, film_id: str = None):
     text = (
         '<b dir="rtl">🎬 به ربات باکس‌آفیس خوش آمدید!</b>\n\n'
@@ -86,7 +104,7 @@ async def send_welcome_with_membership_buttons(user_id: int, film_id: str = None
     )
     keyboard = membership_keyboard(film_id)
     try:
-        if WELCOME_IMAGE_URL.strip():
+        if WELCOME_IMAGE_URL:
             await app.send_photo(chat_id=user_id, photo=WELCOME_IMAGE_URL, caption=text,
                                  reply_markup=keyboard, parse_mode=ParseMode.HTML, disable_notification=in_silent_mode())
         else:
@@ -97,13 +115,14 @@ async def send_welcome_with_membership_buttons(user_id: int, film_id: str = None
         await app.send_message(chat_id=user_id, text=text, reply_markup=keyboard,
                                parse_mode=ParseMode.HTML, disable_notification=in_silent_mode())
 
+# Send thanks message after confirming membership
 async def send_thanks_message(user_id: int):
     text = (
         '<b dir="rtl">🌟 ممنون که عضو شدید!</b>\n\n'
         '<span dir="rtl">حالا می‌توانید از ربات استفاده کنید.</span>'
     )
     try:
-        if THANKS_IMAGE_URL.strip():
+        if THANKS_IMAGE_URL:
             msg = await app.send_photo(chat_id=user_id, photo=THANKS_IMAGE_URL, caption=text,
                                        parse_mode=ParseMode.HTML, disable_notification=in_silent_mode())
         else:
@@ -113,6 +132,7 @@ async def send_thanks_message(user_id: int):
     except Exception as e:
         logger.error(f"[Error] Failed to send thanks message to user {user_id}: {e}")
 
+# Delete messages after delay
 async def delete_messages_later(messages, delay=DELETE_DELAY_SECONDS):
     await asyncio.sleep(delay)
     for msg in messages:
@@ -121,16 +141,21 @@ async def delete_messages_later(messages, delay=DELETE_DELAY_SECONDS):
         except Exception:
             pass
 
+# --- Handlers ---
+
+# Ping for testing
 @app.on_message(filters.command("ping") & filters.private)
 async def ping_handler(client, message):
     await message.reply("pong 🏓", disable_notification=in_silent_mode())
 
+# /start handler with optional film_id deep link
 @app.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message):
     user_id = message.from_user.id
     args = message.text.split()
     if len(args) == 2:
         film_id = args[1]
+        # Check user membership
         for ch in REQUIRED_CHANNELS:
             try:
                 member = await client.get_chat_member(ch, user_id)
@@ -142,10 +167,12 @@ async def start_handler(client, message):
                 await message.reply("📛 برای دریافت فایل ابتدا عضو کانال‌های زیر شوید:",
                                     reply_markup=InlineKeyboardMarkup(btns), disable_notification=in_silent_mode())
                 return
+
         files = list(films_col.find({"film_id": film_id}))
         if not files:
             await message.reply("❌ فایلی برای این شناسه پیدا نشد.", disable_notification=in_silent_mode())
             return
+
         sent_msgs = []
         for file in files:
             films_col.update_one({"file_id": file["file_id"]}, {"$inc": {"views": 1}})
@@ -158,12 +185,14 @@ async def start_handler(client, message):
             ])
             sent = await message.reply_video(file['file_id'], caption=cap, reply_markup=btns, disable_notification=in_silent_mode())
             sent_msgs.append(sent)
+
         warning_msg = await message.reply('<span dir="rtl">⏳ فقط ۳۰ ثانیه فرصت دارید فایل‌ها را ذخیره کنید! پس از آن پیام‌ها حذف خواهند شد.</span>', disable_notification=in_silent_mode())
         sent_msgs.append(warning_msg)
         asyncio.create_task(delete_messages_later(sent_msgs, DELETE_DELAY_SECONDS))
     else:
         await send_welcome_with_membership_buttons(user_id)
 
+# Callback: check membership
 @app.on_callback_query(filters.regex(r"^check(_.*)?$"))
 async def check_membership_callback(client, callback_query):
     user_id = callback_query.from_user.id
@@ -171,6 +200,7 @@ async def check_membership_callback(client, callback_query):
     film_id = None
     if data.startswith("check_") and data != "check_membership":
         film_id = data.split("_", 1)[1]
+
     not_joined = []
     for ch in REQUIRED_CHANNELS:
         try:
@@ -179,19 +209,25 @@ async def check_membership_callback(client, callback_query):
                 not_joined.append(ch)
         except Exception:
             not_joined.append(ch)
+
     if not_joined:
         text = "❌ هنوز در کانال‌ها و گروه‌های زیر عضو نشده‌اید:\n" + "\n".join(not_joined) + "\n\nلطفاً ابتدا عضو شوید و سپس دوباره روی «✅ عضو شدم» کلیک کنید."
         await callback_query.answer(text, show_alert=True)
         await send_welcome_with_membership_buttons(user_id, film_id)
     else:
         await callback_query.answer("🎉 تبریک! شما عضو همه کانال‌ها و گروه‌ها هستید.", show_alert=True)
-        # به جای ویرایش پیام، پیام قبلی حذف شده و پیام جدید ارسال می‌شود:
+        thanks_text = (
+            '<b dir="rtl">🌟 ممنون که عضو شدید!</b>\n\n'
+            '<span dir="rtl">حالا می‌توانید از ربات استفاده کنید.</span>'
+        )
         try:
-            await callback_query.message.delete()
+            # اگر پیام قبلی عکس بود، به متن ساده تبدیل می‌کنیم
+            await callback_query.message.edit_text(thanks_text, parse_mode=ParseMode.HTML, reply_markup=None)
         except Exception:
+            # اگر پیام قبلی متن بود و تغییر نداشت، خطا نده
             pass
-        await send_thanks_message(user_id)
 
+# Callback: download file
 @app.on_callback_query(filters.regex(r"^download_(.+)$"))
 async def download_handler(client, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
@@ -204,6 +240,7 @@ async def download_handler(client, callback_query: CallbackQuery):
     except Exception:
         pass
 
+# Callback: show stats
 @app.on_callback_query(filters.regex(r"^stats_(.+)$"))
 async def stats_handler(client, callback_query: CallbackQuery):
     file_id = callback_query.data.split("_", 1)[1]
@@ -219,6 +256,7 @@ async def stats_handler(client, callback_query: CallbackQuery):
     )
     await callback_query.answer(text, show_alert=True)
 
+# Inline query handler (برای اشتراک گذاری و جستجو)
 @app.on_inline_query()
 async def inline_query_handler(client: Client, inline_query: InlineQuery):
     query = inline_query.query.strip()
@@ -226,10 +264,12 @@ async def inline_query_handler(client: Client, inline_query: InlineQuery):
     if not query:
         await inline_query.answer(results=[], cache_time=0, switch_pm_text="لطفاً شناسه فیلم را وارد کنید.", switch_pm_parameter="start")
         return
+
     result = films_col.find_one_and_update({"film_id": query}, {"$inc": {"shares": 1}}, return_document=ReturnDocument.AFTER)
     if not result:
         await inline_query.answer(results=[], cache_time=0, switch_pm_text="فیلم پیدا نشد.", switch_pm_parameter="start")
         return
+
     caption = (
         f"<b dir='rtl'>{result.get('caption', 'بدون توضیحات')}</b>\n\n"
         f"🎞 کیفیت: {result.get('quality', 'نامشخص')}\n"
@@ -245,10 +285,16 @@ async def inline_query_handler(client: Client, inline_query: InlineQuery):
     ]
     await inline_query.answer(results=results, cache_time=0)
 
+# --- Upload flow for admins ---
+
 @app.on_message(filters.command("upload") & filters.private & filters.user(ADMIN_IDS))
 async def upload_start(client, message):
     await message.reply("📝 لطفاً نام فیلم (شناسه یکتا) را وارد کنید:")
-    upload_states_col.update_one({"admin_id": message.from_user.id}, {"$set": {"step": "waiting_title", "files": [], "cover_sent": False}}, upsert=True)
+    upload_states_col.update_one(
+        {"admin_id": message.from_user.id},
+        {"$set": {"step": "waiting_title", "files": [], "cover_sent": False}},
+        upsert=True
+    )
     logger.info(f"Upload started by admin {message.from_user.id}")
 
 @app.on_message(filters.private & filters.user(ADMIN_IDS))
@@ -267,7 +313,8 @@ async def upload_handler(client, message):
         if not text:
             await message.reply("❌ لطفاً فقط متن ارسال کنید برای نام فیلم (شناسه یکتا).")
             return
-        upload_states_col.update_one({"admin_id": message.from_user.id}, {"$set": {"step": "waiting_caption", "title": text, "files": [], "cover_sent": False}})
+        upload_states_col.update_one({"admin_id": message.from_user.id},
+                                     {"$set": {"step": "waiting_caption", "title": text, "files": [], "cover_sent": False}})
         await message.reply("🖋 لطفاً کپشن فیلم را ارسال کنید:")
         return
 
@@ -275,7 +322,8 @@ async def upload_handler(client, message):
         if not text:
             await message.reply("❌ لطفاً فقط متن ارسال کنید برای کپشن فیلم.")
             return
-        upload_states_col.update_one({"admin_id": message.from_user.id}, {"$set": {"step": "waiting_quality", "caption": text}})
+        upload_states_col.update_one({"admin_id": message.from_user.id},
+                                     {"$set": {"step": "waiting_quality", "caption": text}})
         await message.reply("🎞 لطفاً کیفیت فیلم را وارد کنید (مثلاً: 720p):")
         return
 
@@ -283,7 +331,8 @@ async def upload_handler(client, message):
         if not text:
             await message.reply("❌ لطفاً فقط متن ارسال کنید برای کیفیت فیلم.")
             return
-        upload_states_col.update_one({"admin_id": message.from_user.id}, {"$set": {"step": "waiting_file", "quality": text}})
+        upload_states_col.update_one({"admin_id": message.from_user.id},
+                                     {"$set": {"step": "waiting_file", "quality": text}})
         await message.reply("📤 لطفاً فایل ویدیویی را ارسال کنید:")
         return
 
@@ -356,8 +405,10 @@ async def upload_more_callback(client, callback_query):
         cover_file_id = state.get("cover_file_id")
         files = state.get("files", [])
 
+        # حذف فایل‌های قبلی با همین film_id (اگر لازم باشد)
         films_col.delete_many({"film_id": title})
 
+        # افزودن cover_file_id به هر فایل (اگر وجود داشته باشد)
         if cover_file_id:
             for f in files:
                 f["cover_file_id"] = cover_file_id
@@ -377,6 +428,7 @@ async def upload_more_callback(client, callback_query):
         )
         await callback_query.answer("✅ آپلود با موفقیت انجام شد.", show_alert=True)
 
+# Welcome new members in channels/groups
 WELCOME_NEW_MEMBER_MESSAGE = (
     '<b dir="rtl">🌟 سلام {first_name} عزیز!</b>\n\n'
     '<span dir="rtl">🎉 به کانال/گروه ما خوش آمدی!</span>\n\n'
@@ -414,6 +466,7 @@ async def welcome_new_member(client: Client, chat_member_update: ChatMemberUpdat
         except Exception as e:
             logger.error(f"خطا در ارسال پیام خوشامدگویی به کاربر {user.id}: {e}")
 
+# Run the bot
 if __name__ == "__main__":
     logger.info("🤖 ربات BoxOfficeUploaderBot در حال اجراست...")
     app.run()
