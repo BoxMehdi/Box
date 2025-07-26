@@ -85,7 +85,7 @@ def url_to_buttons(text):
 
 async def delete_previous_bot_messages(chat_id):
     try:
-        async for msg in app.get_chat_history(chat_id, limit=10):
+        async for msg in app.get_chat_history(chat_id, limit=20):
             if msg.from_user and msg.from_user.is_bot:
                 await msg.delete()
     except Exception as e:
@@ -93,13 +93,16 @@ async def delete_previous_bot_messages(chat_id):
 
 @app.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message):
+    logger.info(f"/start handler triggered by user {message.from_user.id}")
+
+    # حذف دقیق پیام‌های قبلی ربات تا ۲۰ پیام اخیر
     await delete_previous_bot_messages(message.chat.id)
 
     args = message.text.split(maxsplit=1)
     user_id = message.from_user.id
 
     if len(args) == 1:
-        # کاربر هنوز عضو نیست: ارسال عکس اول + پیام + دکمه‌ها
+        # فقط یک پیام خوش‌آمدگویی با عکس و دکمه‌ها بفرست
         if WELCOME_IMAGE_URL:
             await app.send_photo(
                 message.chat.id,
@@ -118,8 +121,8 @@ async def start_handler(client, message):
 
     film_id = args[1]
 
-    # اگر عضو نیست، دوباره با دکمه‌ها و عکس اول هشدار بده
     if not await check_user_membership(user_id):
+        # اگر عضو نیست، دوباره همون پیام خوش‌آمدگویی با عکس و دکمه بفرست
         if WELCOME_IMAGE_URL:
             await app.send_photo(
                 message.chat.id,
