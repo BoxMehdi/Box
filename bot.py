@@ -8,7 +8,7 @@ from io import StringIO
 
 import qrcode
 from flask import Flask, send_file
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
@@ -449,5 +449,13 @@ async def silent_end():
     logger.info("☀️ حالت سکوت غیرفعال شد.")
 
 
-scheduler.start()
-bot.run()
+async def main():
+    scheduler.start()
+    await bot.start()
+    logger.info("🤖 ربات در حال اجراست...")
+    await idle()
+    await bot.stop()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
