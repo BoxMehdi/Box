@@ -1,7 +1,7 @@
 pyrogram==2.0.106
-pymongo==4.13.2
-python-dotenv==1.1.1
 tgcrypto==1.2.5
-qrcode
-flask
-apscheduler
+pymongo==4.13.2
+python-dotenv==1.0.1
+Flask==2.3.3
+qrcode==7.4.2
+apscheduler==3.10.4
