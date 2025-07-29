@@ -17,7 +17,7 @@ from pyrogram.errors import UserNotParticipant
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
+from pyrogram.idle import idle
 # --------------- Load .env variables ---------------
 load_dotenv()
 
